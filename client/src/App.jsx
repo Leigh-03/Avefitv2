@@ -43,6 +43,7 @@ import TrainerDashboard from "./pages/TrainerDashboard";
 import TrainerProfile from "./pages/TrainerProfile";
 import TrainerWorkoutPlans from "./pages/TrainerWorkoutPlans";
 import TrainerExercises from "./pages/TrainerExercises";
+import TrainerAvailability from "./pages/TrainerAvailability";
 
 function AdminProtectedRoute({ children }) {
   const token = sessionStorage.getItem("avefit_token");
@@ -121,7 +122,9 @@ export default function App() {
                 <Routes>
                   <Route path="/roster" element={<TrainerDashboard />} />
                   <Route path="/workout-plans" element={<TrainerWorkoutPlans />} />
+                  <Route path="/availability" element={<TrainerAvailability />} />
                   <Route path="/exercises" element={<TrainerExercises />} />
+                  <Route path="/notifications" element={<Notifications audience="trainer" />} />
                   <Route path="/profile" element={<TrainerProfile />} />
                   <Route path="*" element={<Navigate to="/trainer/roster" replace />} />
                 </Routes>
@@ -155,6 +158,7 @@ export default function App() {
                   <Route path="/coaches" element={<Coaches />} />
                   <Route path="/about" element={<AboutUs />} />
                   <Route path="/profile" element={<ProfilePage />} />
+                  <Route path="/notifications" element={<Notifications audience="user" />} />
                   <Route path="*" element={<Navigate to="/user/workout" replace />} />
                 </Routes>
               </UserLayout>

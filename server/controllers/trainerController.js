@@ -2,6 +2,7 @@ const pool = require("../db");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const loadExerciseCatalog = require("../utils/exerciseCatalog");
+const { createNotification } = require("../utils/notifications");
 
 const {
   validateEmail,
@@ -755,7 +756,22 @@ const getActiveTrainers = async (req, res) => {
         goal_specialty,
         photo_url,
         bio,
-        phone
+        phone,
+        (
+          SELECT COALESCE(
+            json_agg(
+              json_build_object(
+                'day_of_week', ta.day_of_week,
+                'start_time', TO_CHAR(ta.start_time, 'HH24:MI'),
+                'end_time', TO_CHAR(ta.end_time, 'HH24:MI')
+              )
+              ORDER BY ta.day_of_week, ta.start_time
+            ),
+            '[]'::json
+          )
+          FROM trainer_availability ta
+          WHERE ta.trainer_id = trainers.trainer_id
+        ) AS availability
       FROM trainers
       WHERE status = 'Active'
       ORDER BY full_name ASC
@@ -1259,6 +1275,15 @@ const createMyWorkoutPlan = async (req, res) => {
 
     await client.query("COMMIT");
     transactionStarted = false;
+    await createNotification({
+      audience: "user",
+      recipientId: userId,
+      message: `Your coach added the workout plan "${planName}".`,
+      notificationType: "workout",
+      targetUrl: "/user/workout",
+    }).catch((err) => {
+      console.error("Workout plan notification failed:", err.message);
+    });
     res.status(201).json({ success: true, data: { ...plan.rows[0], session_date: sessionDate, exercise_count: sessions.length } });
   } catch (err) {
     if (transactionStarted) await client.query("ROLLBACK");
@@ -1715,6 +1740,16 @@ const assignSessionAsTrainer = async (req, res) => {
         session_date,
       ]
     );
+
+    await createNotification({
+      audience: "user",
+      recipientId: Number(user_id),
+      message: "Your coach added a workout task to your plan.",
+      notificationType: "workout",
+      targetUrl: "/user/workout",
+    }).catch((err) => {
+      console.error("Assigned workout notification failed:", err.message);
+    });
 
     res.status(201).json({
       success: true,

@@ -1,5 +1,6 @@
 const pool = require("../db");
 const getExerciseCatalog = require("../utils/exerciseCatalog");
+const { createNotification } = require("../utils/notifications");
 
 const getWorkouts = async (req, res) => {
   try {
@@ -80,6 +81,17 @@ const createWorkoutPlan = async (req, res) => {
       INSERT INTO workout_plans (user_id, trainer_id, plan_name, goal)
       VALUES ($1,$2,$3,$4) RETURNING *
     `, [user_id || null, trainer_id || null, plan_name, goal]);
+    if (user_id) {
+      await createNotification({
+        audience: "user",
+        recipientId: Number(user_id),
+        message: `Your coach added the workout plan "${plan_name}".`,
+        notificationType: "workout",
+        targetUrl: "/user/workout",
+      }).catch((err) => {
+        console.error("Workout plan notification failed:", err.message);
+      });
+    }
     res.status(201).json({ success: true, data: result.rows[0] });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
@@ -148,6 +160,16 @@ const assignSessionToMember = async (req, res) => {
       INSERT INTO workout_sessions (workout_plan_id, exercise_id, sets, reps, duration_minutes, session_date)
       VALUES ($1,$2,$3,$4,$5,$6) RETURNING *
     `, [planId, exercise_id, sets || null, reps || null, duration_minutes || null, session_date]);
+
+    await createNotification({
+      audience: "user",
+      recipientId: Number(user_id),
+      message: "A new workout task was added to your plan.",
+      notificationType: "workout",
+      targetUrl: "/user/workout",
+    }).catch((err) => {
+      console.error("Assigned workout notification failed:", err.message);
+    });
 
     res.status(201).json({ success: true, data: result.rows[0] });
   } catch (err) {

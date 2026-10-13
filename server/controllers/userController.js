@@ -15,6 +15,7 @@ const {
   publicUser,
 } = require("../utils/security");
 const { sendMail, sendVerificationEmail } = require("../utils/mailer");
+const { notifyNewUser } = require("../utils/notifications");
 const googleClient = new OAuth2Client();
 const {
   generateVerificationCode,
@@ -205,6 +206,9 @@ const register = async (req, res) => {
     );
 
     const user = result.rows[0];
+    await notifyNewUser(user).catch((err) => {
+      console.error("New-user admin notification failed:", err.message);
+    });
 
     // Email verification and gym approval are both required before login;
     // admins may review the account before email verification completes.
@@ -668,6 +672,9 @@ const googleLogin = async (req, res) => {
         ]
       );
       user = result.rows[0];
+      await notifyNewUser(user).catch((err) => {
+        console.error("Google signup admin notification failed:", err.message);
+      });
     } else if (user.google_sub && user.google_sub !== googleProfile.sub) {
       return res.status(409).json({
         success: false,

@@ -19,8 +19,22 @@ const expireMemberships = async (userId = null) => {
       AND membership_end_date IS NOT NULL
       AND membership_end_date < (NOW() AT TIME ZONE 'Asia/Manila')::date
       AND ($1::integer IS NULL OR user_id = $1)
-    RETURNING user_id
+    RETURNING user_id, first_name, last_name
   `, [userId]);
+
+  if (result.rowCount > 0) {
+    const { createNotification } = require("./utils/notifications");
+    await Promise.all(result.rows.map((user) => createNotification({
+      audience: "user",
+      recipientId: user.user_id,
+      notificationType: "membership",
+      message: "Your membership has ended. Please contact the gym administrator for assistance.",
+      userName: `${user.first_name || ""} ${user.last_name || ""}`.trim() || null,
+      targetUrl: "/user/profile",
+    }).catch((err) => {
+      console.error("Membership expiry notification failed:", err.message);
+    })));
+  }
 
   return result.rowCount;
 };
@@ -38,6 +52,68 @@ const initializeDatabase = async () => {
 
   try {
     await client.query("BEGIN");
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS trainer_availability (
+        availability_id BIGSERIAL PRIMARY KEY,
+        trainer_id INTEGER NOT NULL REFERENCES trainers(trainer_id) ON DELETE CASCADE,
+        day_of_week SMALLINT NOT NULL CHECK (day_of_week BETWEEN 0 AND 6),
+        start_time TIME NOT NULL,
+        end_time TIME NOT NULL,
+        CHECK (start_time < end_time),
+        UNIQUE (trainer_id, day_of_week, start_time, end_time)
+      )
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS trainer_availability_trainer_day_idx
+      ON trainer_availability (trainer_id, day_of_week, start_time)
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS app_notifications (
+        notification_id BIGSERIAL PRIMARY KEY,
+        audience_type VARCHAR(20) NOT NULL CHECK (audience_type IN ('admin', 'trainer', 'user')),
+        recipient_id INTEGER NOT NULL,
+        message TEXT NOT NULL,
+        notification_type VARCHAR(40) NOT NULL DEFAULT 'general',
+        related_user_name TEXT,
+        target_url TEXT,
+        is_read BOOLEAN NOT NULL DEFAULT FALSE,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS app_notifications_recipient_created_idx
+      ON app_notifications (audience_type, recipient_id, created_at DESC)
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS push_subscriptions (
+        subscription_id BIGSERIAL PRIMARY KEY,
+        audience_type VARCHAR(20) NOT NULL CHECK (audience_type IN ('admin', 'trainer', 'user')),
+        recipient_id INTEGER NOT NULL,
+        endpoint TEXT NOT NULL,
+        subscription JSONB NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+
+    await client.query(`
+      ALTER TABLE push_subscriptions
+      DROP CONSTRAINT IF EXISTS push_subscriptions_endpoint_key
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS push_subscriptions_recipient_idx
+      ON push_subscriptions (audience_type, recipient_id)
+    `);
+
+    await client.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS push_subscriptions_recipient_endpoint_idx
+      ON push_subscriptions (audience_type, recipient_id, endpoint)
+    `);
 
     await client.query(`
       ALTER TABLE workout_sessions
@@ -167,16 +243,6 @@ const initializeDatabase = async () => {
     `);
 
     await client.query(`
-      UPDATE users
-      SET account_status = 'Inactive',
-          token_version = token_version + 1,
-          updated_at = CURRENT_TIMESTAMP
-      WHERE LOWER(COALESCE(account_status, 'pending')) = 'active'
-        AND membership_end_date IS NOT NULL
-        AND membership_end_date < (NOW() AT TIME ZONE 'Asia/Manila')::date
-    `);
-
-    await client.query(`
       ALTER TABLE trainers
       ADD COLUMN IF NOT EXISTS token_version INTEGER NOT NULL DEFAULT 0
     `);
@@ -213,8 +279,9 @@ const initializeDatabase = async () => {
     await client.query("COMMIT");
 
     console.log(
-      "✅ Database approval, email verification, Google auth, and trainer specialization schema ready"
+      "✅ Database approval, email verification, Google auth, push notification, and trainer specialization schema ready"
     );
+    await expireMemberships();
   } catch (err) {
     await client.query("ROLLBACK");
     console.error(

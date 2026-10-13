@@ -3,6 +3,7 @@ const router = express.Router();
 const verifyToken = require("../middleware/authMiddleware");
 const verifyTrainer = require("../middleware/trainerAuthMiddleware");
 const { userLoginLimiter } = require("../middleware/rateLimit");
+const availabilityController = require("../controllers/trainerAvailabilityController");
 const {
   getTrainers, getTrainerById, createTrainer, updateTrainer, approveTrainer, rejectTrainer, deactivateTrainer, deleteTrainer, getTrainerRoster,
   loginTrainer, getMyRoster, getMyProfile, updateMyPhoto, getExerciseCatalog,
@@ -15,6 +16,8 @@ router.post("/login", userLoginLimiter, loginTrainer);
 router.get("/me/roster", verifyTrainer, getMyRoster);
 router.get("/me/profile", verifyTrainer, getMyProfile);
 router.put("/me/photo", verifyTrainer, updateMyPhoto);
+router.get("/me/availability", verifyTrainer, availabilityController.getForTrainer);
+router.put("/me/availability", verifyTrainer, availabilityController.saveForTrainer);
 router.get("/me/workout-plans", verifyTrainer, getMyWorkoutPlans);
 router.post("/me/workout-plans", verifyTrainer, createMyWorkoutPlan);
 router.delete("/me/workout-plans/:planId", verifyTrainer, deleteMyWorkoutPlan);
@@ -26,6 +29,8 @@ router.delete("/me/sessions/:sessionId", verifyTrainer, deleteSessionAsTrainer);
 // Admin-managed trainer records
 router.get("/", verifyToken, getTrainers);
 router.get("/:id/roster", verifyToken, getTrainerRoster);
+router.get("/:id/availability", verifyToken, availabilityController.getForAdmin);
+router.put("/:id/availability", verifyToken, availabilityController.saveForAdmin);
 router.get("/:id", verifyToken, getTrainerById);
 router.post("/", verifyToken, createTrainer);
 router.put("/:id", verifyToken, updateTrainer);

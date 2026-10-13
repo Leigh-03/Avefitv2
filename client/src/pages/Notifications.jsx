@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Bell, CheckCheck, Trash2, Circle } from "lucide-react";
-import api from "../services/api";
+import { createNotificationsApi } from "../services/notificationsApi";
+import BrowserPushSettings from "../components/notifications/BrowserPushSettings";
 
 const typeColors = {
   workout: "border-green-200 bg-green-50 text-green-800 dark:border-green-500/20 dark:bg-green-500/10 dark:text-green-300",
@@ -10,7 +11,8 @@ const typeColors = {
   general: "border-slate-200 bg-slate-100 text-slate-700 dark:border-white/10 dark:bg-white/5 dark:text-slate-300",
 };
 
-export default function Notifications() {
+export default function Notifications({ audience = "admin" }) {
+  const notificationsApi = useMemo(() => createNotificationsApi(audience), [audience]);
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState("All");
@@ -18,25 +20,25 @@ export default function Notifications() {
   const [actionError, setActionError] = useState("");
   const [busyAction, setBusyAction] = useState("");
 
-  const fetchNotifications = () => {
+  const fetchNotifications = useCallback(() => {
     setLoading(true);
     setFetchError("");
-    api.get("/notifications")
+    notificationsApi.get("/")
       .then((res) => setNotifications(res.data.data))
       .catch((err) => {
         console.error(err);
         setFetchError(err.response?.data?.message || err.message || "Couldn't load notifications.");
       })
       .finally(() => setLoading(false));
-  };
+  }, [notificationsApi]);
 
-  useEffect(() => { fetchNotifications(); }, []);
+  useEffect(() => { fetchNotifications(); }, [fetchNotifications]);
 
   const handleMarkRead = async (id) => {
     setActionError("");
     setBusyAction(String(id));
     try {
-      await api.put(`/notifications/${id}/read`);
+      await notificationsApi.put(`/${id}/read`);
       setNotifications((prev) => prev.map((n) => n.notification_id === id ? { ...n, is_read: true } : n));
     } catch (err) {
       setActionError(err.response?.data?.message || "Unable to mark this notification as read.");
@@ -49,7 +51,7 @@ export default function Notifications() {
     setActionError("");
     setBusyAction("all");
     try {
-      await api.put("/notifications/mark-all-read");
+      await notificationsApi.put("/mark-all-read");
       setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })));
     } catch (err) {
       setActionError(err.response?.data?.message || "Unable to mark notifications as read.");
@@ -62,7 +64,7 @@ export default function Notifications() {
     setActionError("");
     setBusyAction(String(id));
     try {
-      await api.delete(`/notifications/${id}`);
+      await notificationsApi.delete(`/${id}`);
       setNotifications((prev) => prev.filter((n) => n.notification_id !== id));
     } catch (err) {
       setActionError(err.response?.data?.message || "Unable to delete this notification.");
@@ -89,7 +91,7 @@ export default function Notifications() {
       {actionError && <div role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300">{actionError}</div>}
       <header className="ave-page-hero flex flex-wrap items-end justify-between gap-4 rounded-3xl border border-orange-100 px-5 py-6 dark:border-white/5 sm:px-7 sm:py-8">
         <div>
-          <p className="text-xs font-bold uppercase tracking-[0.16em] text-orange-600 dark:text-orange-400">Admin inbox</p>
+          <p className="text-xs font-bold uppercase tracking-[0.16em] text-orange-600 dark:text-orange-400">{audience === "admin" ? "Admin inbox" : audience === "trainer" ? "Coach inbox" : "Member inbox"}</p>
           <h1 className="mt-2 text-3xl font-black text-slate-900 dark:text-white">Notifications</h1>
           <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
             {unreadCount > 0 ? `${unreadCount} unread notification${unreadCount > 1 ? "s" : ""}` : "All caught up!"}
@@ -106,6 +108,8 @@ export default function Notifications() {
           </button>
         )}
       </header>
+
+      <BrowserPushSettings audience={audience} />
 
       {/* Filter tabs */}
       <div className="flex gap-2" role="group" aria-label="Filter notifications">
@@ -141,7 +145,7 @@ export default function Notifications() {
           <div className="py-20 text-center">
             <Bell size={40} className="mx-auto text-slate-200 mb-3" />
             <p className="font-semibold text-slate-700 dark:text-slate-200">{notifications.length ? `No ${filter.toLowerCase()} notifications.` : "You’re all caught up."}</p>
-            <p className="mt-1 text-sm text-slate-500">{notifications.length ? "Choose another filter to view your notifications." : "New admin updates will appear here."}</p>
+            <p className="mt-1 text-sm text-slate-500">{notifications.length ? "Choose another filter to view your notifications." : "New updates will appear here."}</p>
           </div>
         ) : (
           <div className="divide-y divide-slate-100">

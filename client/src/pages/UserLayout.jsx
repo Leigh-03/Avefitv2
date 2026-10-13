@@ -1,6 +1,7 @@
-import { useNavigate } from "react-router-dom";
-import { Dumbbell, Home, Info, TrendingUp, User, UsersRound } from "lucide-react";
+import { useLocation, useNavigate } from "react-router-dom";
+import { Bell, Dumbbell, Home, Info, TrendingUp, User, UsersRound } from "lucide-react";
 import AppShell from "../components/layout/AppShell";
+import useUnreadCount from "../components/layout/useUnreadCount";
 import { useUserAuth } from "../context/UserAuthContext";
 
 const NAV = [
@@ -14,7 +15,9 @@ const NAV = [
 
 export default function UserLayout({ children }) {
   const navigate = useNavigate();
+  const location = useLocation();
   const { user, logoutUser } = useUserAuth();
+  const unread = useUnreadCount(location.pathname, "user");
 
   const handleLogout = () => {
     logoutUser();
@@ -40,6 +43,17 @@ export default function UserLayout({ children }) {
           : null
       }
       onLogout={handleLogout}
+      actions={
+        <button
+          type="button"
+          onClick={() => navigate("/user/notifications")}
+          aria-label={unread > 0 ? `Notifications, ${unread} unread` : "Notifications"}
+          className="relative grid h-10 w-10 place-items-center rounded-xl text-slate-600 transition hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-white/5 dark:hover:text-white"
+        >
+          <Bell size={20} />
+          {unread > 0 && <span className="absolute -right-0.5 -top-0.5 grid h-[18px] min-w-[18px] place-items-center rounded-full bg-red-500 px-1 text-[10px] font-bold leading-none text-white">{unread > 9 ? "9+" : unread}</span>}
+        </button>
+      }
       topbarLeft={
         <span className="block min-w-0">
           <span className="block truncate text-sm font-semibold text-slate-900 dark:text-white">

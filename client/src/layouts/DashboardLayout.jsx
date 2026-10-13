@@ -36,7 +36,7 @@ const PAGE_TITLES = {
 export default function DashboardLayout({ children }) {
   const navigate = useNavigate();
   const location = useLocation();
-  const unread = useUnreadCount(location.pathname);
+  const unread = useUnreadCount(location.pathname, "admin");
   const admin = JSON.parse(localStorage.getItem("avefit_admin") || "{}");
 
   const nav = useMemo(

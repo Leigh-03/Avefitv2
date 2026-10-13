@@ -9,6 +9,8 @@ const aliases = {
   "General Fitness": ["general fitness", "fitness", "functional fitness", "group fitness", "hiit", "circuit training", "conditioning"],
 };
 
+const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
 function score(t, goal) {
   const text = `${(t.specializations || []).join(" ")} ${t.bio || ""} ${t.goal_specialty || ""}`.toLowerCase();
   return (t.goal_specialty === goal ? 100 : 0) +
@@ -64,6 +66,21 @@ function TrainerProfileModal({ trainer, goal, onClose }) {
             <p className="text-xs uppercase tracking-wider font-bold text-slate-400 mb-3">Expertise</p>
             <div className="flex flex-wrap gap-2">
               {items.length ? items.map((item) => <span key={item} className="px-3 py-2 rounded-full bg-orange-50 dark:bg-orange-500/10 text-orange-600 dark:text-orange-400 text-xs font-semibold">{item}</span>) : <span className="text-sm text-slate-400">No specializations listed.</span>}
+            </div>
+            <div className="mt-7">
+              <p className="mb-3 text-xs font-bold uppercase tracking-wider text-slate-400">Weekly availability</p>
+              {trainer.availability?.length ? (
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {trainer.availability.map((slot, index) => (
+                    <div key={`${slot.day_of_week}-${slot.start_time}-${index}`} className="flex justify-between gap-3 rounded-xl bg-slate-50 px-3 py-2 text-sm dark:bg-slate-900">
+                      <span className="font-medium text-slate-700 dark:text-slate-200">{DAY_NAMES[slot.day_of_week]}</span>
+                      <span className="text-slate-500 dark:text-slate-400">{slot.start_time}–{slot.end_time}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm text-slate-400">Availability has not been posted yet.</p>
+              )}
             </div>
           </div>
           <div className="mt-7 rounded-2xl bg-slate-50 dark:bg-slate-900 p-4 flex items-center gap-3">

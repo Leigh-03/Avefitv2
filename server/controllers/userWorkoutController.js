@@ -1,4 +1,5 @@
 const pool = require("../db");
+const { createNotification } = require("../utils/notifications");
 
 // GET user's workout plan
 const getUserWorkoutPlan = async (req, res) => {
@@ -122,11 +123,42 @@ const completeSession = async (req, res) => {
         AND ws.workout_plan_id = wp.workout_plan_id
         AND wp.user_id = $2
         AND ws.started_at IS NOT NULL
-      RETURNING ws.session_id
+        AND ws.completed = false
+      RETURNING ws.session_id, ws.workout_plan_id
     `, [req.params.id, req.user.user_id]);
 
     if (result.rowCount === 0) {
-      return res.status(404).json({ success: false, message: "Start this workout before marking it complete." });
+      return res.status(404).json({ success: false, message: "Workout not found, not started, or already completed." });
+    }
+
+    let workout;
+    try {
+      const workoutDetails = await pool.query(
+        `SELECT COALESCE(wp.trainer_id, u.trainer_id) AS trainer_id,
+                e.exercise_name, u.first_name, u.last_name
+         FROM workout_plans wp
+         JOIN users u ON u.user_id = wp.user_id
+         JOIN workout_sessions ws ON ws.workout_plan_id = wp.workout_plan_id
+         LEFT JOIN exercises e ON e.exercise_id = ws.exercise_id
+         WHERE wp.workout_plan_id = $1 AND ws.session_id = $2`,
+        [result.rows[0].workout_plan_id, result.rows[0].session_id]
+      );
+      workout = workoutDetails.rows[0];
+    } catch (err) {
+      console.error("Workout completion notification recipient lookup failed:", err.message);
+    }
+    if (workout?.trainer_id) {
+      const memberName = `${workout.first_name || ""} ${workout.last_name || ""}`.trim() || "A member";
+      await createNotification({
+        audience: "trainer",
+        recipientId: workout.trainer_id,
+        message: `${memberName} completed ${workout.exercise_name || "a workout task"}.`,
+        notificationType: "workout",
+        userName: memberName,
+        targetUrl: "/trainer/roster",
+      }).catch((err) => {
+        console.error("Workout completion trainer notification failed:", err.message);
+      });
     }
 
     res.json({ success: true, message: "Session completed." });

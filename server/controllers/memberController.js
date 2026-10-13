@@ -1,4 +1,5 @@
 const pool = require("../db");
+const { createNotification } = require("../utils/notifications");
 
 // =====================================================
 // GET ALL MEMBERS FROM USERS TABLE
@@ -312,9 +313,21 @@ const updateMemberMembership = async (req, res) => {
     const result = await pool.query(`
       UPDATE users
       SET membership_months = $1,
-          membership_start_date = COALESCE(membership_start_date, created_at::date),
+          membership_start_date = CASE
+            WHEN membership_start_date IS NULL
+              OR membership_end_date IS NULL
+              OR membership_end_date < (NOW() AT TIME ZONE 'Asia/Manila')::date
+              THEN (NOW() AT TIME ZONE 'Asia/Manila')::date
+            ELSE membership_start_date
+          END,
           membership_end_date = (
-            COALESCE(membership_start_date, created_at::date)
+            CASE
+              WHEN membership_start_date IS NULL
+                OR membership_end_date IS NULL
+                OR membership_end_date < (NOW() AT TIME ZONE 'Asia/Manila')::date
+                THEN (NOW() AT TIME ZONE 'Asia/Manila')::date
+              ELSE membership_start_date
+            END
             + make_interval(months => $1) - INTERVAL '1 day'
           )::date,
           updated_at = CURRENT_TIMESTAMP
@@ -366,6 +379,9 @@ const updateMember = async (req, res) => {
       typeof status === "string" && ["Pending", "Active", "Inactive", "Rejected"].includes(status)
         ? status
         : null;
+    const previousStatus = normalizedStatus === "Inactive"
+      ? await pool.query("SELECT account_status FROM users WHERE user_id = $1", [id])
+      : null;
 
     const result = await pool.query(
       `
@@ -419,6 +435,23 @@ const updateMember = async (req, res) => {
       });
     }
 
+    if (
+      normalizedStatus === "Inactive" &&
+      String(previousStatus?.rows[0]?.account_status || "").toLowerCase() === "active"
+    ) {
+      const user = result.rows[0];
+      await createNotification({
+        audience: "user",
+        recipientId: user.user_id,
+        message: "Your membership has been deactivated by the gym administrator. Please contact the gym for assistance.",
+        notificationType: "membership",
+        userName: `${user.first_name || ""} ${user.last_name || ""}`.trim(),
+        targetUrl: "/user/profile",
+      }).catch((err) => {
+        console.error("Membership deactivation notification failed:", err.message);
+      });
+    }
+
     res.json({
       message: "Member updated successfully",
       member: result.rows[0]
@@ -449,13 +482,21 @@ const approveMember = async (req, res) => {
         account_status = 'Active',
         membership_start_date = CASE
           WHEN membership_months IS NOT NULL
-            AND membership_end_date < (NOW() AT TIME ZONE 'Asia/Manila')::date
+            AND (
+              membership_start_date IS NULL
+              OR membership_end_date IS NULL
+              OR membership_end_date < (NOW() AT TIME ZONE 'Asia/Manila')::date
+            )
             THEN (NOW() AT TIME ZONE 'Asia/Manila')::date
           ELSE membership_start_date
         END,
         membership_end_date = CASE
           WHEN membership_months IS NOT NULL
-            AND membership_end_date < (NOW() AT TIME ZONE 'Asia/Manila')::date
+            AND (
+              membership_start_date IS NULL
+              OR membership_end_date IS NULL
+              OR membership_end_date < (NOW() AT TIME ZONE 'Asia/Manila')::date
+            )
             THEN (
               (NOW() AT TIME ZONE 'Asia/Manila')::date
               + make_interval(months => membership_months)
@@ -504,6 +545,10 @@ const approveMember = async (req, res) => {
 const rejectMember = async (req, res) => {
   try {
     const { id } = req.params;
+    const previous = await pool.query(
+      "SELECT account_status FROM users WHERE user_id = $1",
+      [id]
+    );
 
     const result = await pool.query(
       `
@@ -513,7 +558,7 @@ const rejectMember = async (req, res) => {
         token_version = token_version + 1,
         updated_at = CURRENT_TIMESTAMP
       WHERE user_id = $1
-      RETURNING user_id, account_status
+      RETURNING user_id, account_status, first_name, last_name
       `,
       [id]
     );
@@ -528,6 +573,20 @@ const rejectMember = async (req, res) => {
       "UPDATE members SET status = 'Inactive' WHERE email = (SELECT email FROM users WHERE user_id = $1)",
       [id]
     ).catch(() => {});
+
+    if (String(previous.rows[0]?.account_status || "").toLowerCase() === "active") {
+      const user = result.rows[0];
+      await createNotification({
+        audience: "user",
+        recipientId: user.user_id,
+        message: "Your AveFit membership has been deactivated by the gym administrator. Please contact the gym for assistance.",
+        notificationType: "membership",
+        userName: `${user.first_name || ""} ${user.last_name || ""}`.trim(),
+        targetUrl: "/user/profile",
+      }).catch((err) => {
+        console.error("Membership rejection notification failed:", err.message);
+      });
+    }
 
     res.json({
       message: "Member rejected successfully",

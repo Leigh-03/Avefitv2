@@ -1,7 +1,8 @@
 import { useEffect, useState, useRef } from "react";
-import { UserCheck, Plus, Search, Edit2, XCircle, Users, UserCircle, X, Camera, Check, Eye, EyeOff } from "lucide-react";
+import { UserCheck, Plus, Search, Edit2, XCircle, Users, UserCircle, X, Camera, Check, Eye, EyeOff, CalendarClock } from "lucide-react";
 import api from "../services/api";
 import { fileToCompressedDataUrl } from "../utils/imageUpload";
+import TrainerAvailabilityManager from "../components/trainers/TrainerAvailabilityManager";
 
 const SPECIALIZATION_OPTIONS = [
   "High-Intensity Interval Training (HIIT)",
@@ -623,6 +624,7 @@ export default function Trainers() {
   const [editTrainer, setEditTrainer] = useState(null);
   const [rosterTrainer, setRosterTrainer] = useState(null);
   const [profileTrainer, setProfileTrainer] = useState(null);
+  const [availabilityTrainer, setAvailabilityTrainer] = useState(null);
 
   const fetchTrainers = () => {
     setLoading(true);
@@ -699,6 +701,15 @@ export default function Trainers() {
           trainer={profileTrainer}
           onClose={() => setProfileTrainer(null)}
           onEdit={() => { setEditTrainer(profileTrainer); setProfileTrainer(null); setShowModal(true); }}
+        />
+      )}
+
+      {availabilityTrainer && (
+        <TrainerAvailabilityManager
+          mode="admin"
+          trainerId={availabilityTrainer.trainer_id}
+          trainerName={availabilityTrainer.full_name}
+          onClose={() => setAvailabilityTrainer(null)}
         />
       )}
 
@@ -809,6 +820,14 @@ export default function Trainers() {
                           title="View Roster / Assign Workouts"
                         >
                           <Users size={16} />
+                        </button>
+                        <button
+                          onClick={() => setAvailabilityTrainer(trainer)}
+                          className="p-1.5 rounded-lg hover:bg-blue-50 text-blue-500 transition"
+                          title="Manage availability"
+                          aria-label={`Manage ${trainer.full_name}'s availability`}
+                        >
+                          <CalendarClock size={16} />
                         </button>
                         <button
                           onClick={() => handleEdit(trainer)}
