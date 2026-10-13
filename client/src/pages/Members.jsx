@@ -8,6 +8,8 @@ const statusColors = {
   Inactive: "bg-slate-100 text-slate-500 dark:bg-slate-700/50 dark:text-slate-400",
 };
 
+const MEMBER_STATUS_OPTIONS = ["Active", "Inactive"];
+
 function getBMICategory(bmi) {
   if (!bmi) return { label: "N/A", color: "text-slate-400" };
   if (bmi < 18.5) return { label: "Underweight", color: "text-orange-500" };
@@ -71,14 +73,19 @@ function MemberModal({ member, onClose, onSave }) {
   const [form, setForm] = useState(member || { full_name: "", email: "", phone: "", gender: "", age: "", height: "", weight: "", fitness_goal: "" });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  // Active/Inactive are the admin-selectable statuses; keep the member's current
+  // value (e.g. Pending/Rejected) selectable so editing never silently changes it.
+  const statusOptions = [...new Set([...(form.status ? [form.status] : []), ...MEMBER_STATUS_OPTIONS])];
 
   const handleSubmit = async () => {
     if (!form.full_name || !form.email) return setError("Full name and email are required.");
     setSaving(true); setError("");
     try {
-      if (member) await api.put(`/members/${member.member_id}`, { ...form, status: member.status });
-      else await api.post("/members", form);
-      await onSave(); onClose();
+      const response = member
+        ? await api.put(`/members/${member.member_id}`, { ...form, status: form.status || member.status })
+        : await api.post("/members", form);
+      const savedMember = response?.data?.member || response?.data?.data || (member ? { ...member, ...form, status: form.status || member.status } : null);
+      await onSave(savedMember); onClose();
     } catch (err) {
       setError(err.response?.data?.message || "Failed to save member.");
     } finally { setSaving(false); }
@@ -104,6 +111,13 @@ function MemberModal({ member, onClose, onSave }) {
             </div>)}
           </div>
           {form.height && form.weight && <p className="text-sm text-orange-600 dark:text-orange-400 font-medium">BMI: {(parseFloat(form.weight)/Math.pow(parseFloat(form.height)/100,2)).toFixed(1)} (auto-calculated)</p>}
+          {member && (
+            <div>
+              <label className="block text-sm font-medium text-slate-600 dark:text-gray-300 mb-1">Status</label>
+              <select value={form.status || ""} onChange={e => setForm({ ...form, status: e.target.value })} className="w-full border border-slate-300 dark:border-gray-700 rounded-lg bg-white dark:bg-[#111] text-slate-800 dark:text-white px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-orange-500">{statusOptions.map(s => <option key={s} value={s}>{s}</option>)}</select>
+              <p className="text-xs text-slate-400 mt-1">Set the member Active or Inactive. Inactive members cannot sign in.</p>
+            </div>
+          )}
           {error && <p className="text-red-500 text-sm">{error}</p>}
         </div>
         <div className="p-6 border-t border-slate-200 dark:border-gray-800 flex gap-3 justify-end">
@@ -124,6 +138,7 @@ function ViewModal({ member, trainers, onClose, onEdit, onAssign, onMembershipUp
   const [error, setError] = useState("");
   const [membershipError, setMembershipError] = useState("");
   const assignedTrainer = trainers.find(t => Number(t.trainer_id) === Number(member.trainer_id));
+  const canEditMembershipAndCoach = String(member.status || "").trim() === "Active";
 
   const saveCoach = async () => {
     setSaving(true); setError("");
@@ -203,7 +218,8 @@ function ViewModal({ member, trainers, onClose, onEdit, onAssign, onMembershipUp
                 <select
                   value={membershipMonths}
                   onChange={(event) => setMembershipMonths(event.target.value)}
-                  className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-slate-900 outline-none focus:ring-2 focus:ring-orange-500 dark:border-gray-700 dark:bg-[#111] dark:text-white"
+                  disabled={!canEditMembershipAndCoach}
+                  className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-slate-900 outline-none focus:ring-2 focus:ring-orange-500 disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-700 dark:bg-[#111] dark:text-white"
                 >
                   <option value="1">1 month</option>
                   <option value="3">3 months</option>
@@ -214,10 +230,11 @@ function ViewModal({ member, trainers, onClose, onEdit, onAssign, onMembershipUp
               </label>
             </div>
             {membershipError && <p role="alert" className="mt-2 text-sm text-red-500">{membershipError}</p>}
+            {!canEditMembershipAndCoach && <p className="mt-2 text-xs text-slate-500">Membership editing is locked for rejected members. Set the member to active or approved to edit.</p>}
             <button
               type="button"
               onClick={saveMembership}
-              disabled={savingMembership || String(membershipMonths || "") === String(member.membership_months || "")}
+              disabled={!canEditMembershipAndCoach || savingMembership}
               className="mt-4 w-full rounded-xl bg-orange-500 px-4 py-3 font-bold text-white transition hover:bg-orange-600 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {savingMembership ? "Saving..." : "Save Membership"}
@@ -230,11 +247,12 @@ function ViewModal({ member, trainers, onClose, onEdit, onAssign, onMembershipUp
               {assignedTrainer.photo_url ? <img src={assignedTrainer.photo_url} alt="" className="w-14 h-14 rounded-full object-contain bg-black"/> : <div className="w-14 h-14 rounded-full bg-orange-100 dark:bg-orange-500/20 flex items-center justify-center text-orange-500"><UserRound/></div>}
               <div className="min-w-0"><p className="text-xs font-medium text-slate-500 dark:text-slate-300">Current Coach</p><p className="font-bold text-slate-900 dark:text-white truncate">{assignedTrainer.full_name}</p><p className="text-xs text-orange-700 dark:text-orange-400 truncate">{assignedTrainer.goal_specialty || "General Fitness"}</p></div>
             </div>}
-            <select value={selectedTrainer} onChange={e=>setSelectedTrainer(e.target.value)} className="w-full border border-slate-300 dark:border-gray-700 rounded-2xl bg-white dark:bg-[#111] text-slate-900 dark:text-white px-5 py-4 text-base font-medium outline-none focus:ring-2 focus:ring-orange-500 dark:[color-scheme:dark]">
+            <select value={selectedTrainer} onChange={e=>setSelectedTrainer(e.target.value)} disabled={!canEditMembershipAndCoach} className="w-full border border-slate-300 dark:border-gray-700 rounded-2xl bg-white dark:bg-[#111] text-slate-900 dark:text-white px-5 py-4 text-base font-medium outline-none focus:ring-2 focus:ring-orange-500 disabled:cursor-not-allowed disabled:opacity-60 dark:[color-scheme:dark]">
               {trainers.filter(t=>!t.status || t.status === "Active").map(t=><option key={t.trainer_id} value={t.trainer_id} className="bg-white text-gray-900 dark:bg-[#111] dark:text-white">{t.full_name} — {t.goal_specialty || "General Fitness"}</option>)}
             </select>
             {error && <p className="text-sm text-red-500 mt-2">{error}</p>}
-            <button onClick={saveCoach} disabled={saving || String(selectedTrainer || "") === String(member.trainer_id || "")} className="w-full mt-4 flex items-center justify-center gap-2 py-4 rounded-2xl bg-orange-500 hover:bg-orange-600 text-white font-bold disabled:opacity-50 disabled:cursor-not-allowed"><Save size={18}/>{saving?"Saving...":"Save Designated Coach"}</button>
+            {!canEditMembershipAndCoach && <p className="mt-2 text-xs text-slate-500">Coach assignment is locked for rejected members. Set the member to active or approved to edit.</p>}
+            <button onClick={saveCoach} disabled={!canEditMembershipAndCoach || saving} className="w-full mt-4 flex items-center justify-center gap-2 py-4 rounded-2xl bg-orange-500 hover:bg-orange-600 text-white font-bold disabled:opacity-50 disabled:cursor-not-allowed"><Save size={18}/>{saving?"Saving...":"Save Designated Coach"}</button>
           </div>
         </div>
 
@@ -297,13 +315,49 @@ export default function Members() {
       : current);
   };
 
+  const handleMemberSave = async (savedMember = null) => {
+    // Refresh the member list so table status/fields are current.
+    let rows = [];
+    try {
+      const response = await api.get("/members");
+      rows = Array.isArray(response.data)
+        ? response.data
+        : (response.data?.data || []);
+    } catch {
+      // Fall back to a full reload if the refresh request fails.
+      await fetchData();
+      return;
+    }
+
+    setMembers(rows);
+
+    // Update any open profile views in real time using the fresh record.
+    const savedId = Number(savedMember?.member_id ?? savedMember?.user_id);
+    const updated = Number.isNaN(savedId)
+      ? null
+      : rows.find((row) => Number(row.member_id ?? row.user_id) === savedId) || savedMember;
+
+    if (updated) {
+      setViewMember((current) =>
+        current && Number(current.member_id ?? current.user_id) === Number(updated.member_id ?? updated.user_id)
+          ? updated
+          : current
+      );
+      setEditMember((current) =>
+        current && Number(current.member_id ?? current.user_id) === Number(updated.member_id ?? updated.user_id)
+          ? updated
+          : current
+      );
+    }
+  };
+
   const filtered=members.filter(m=>{const q=search.toLowerCase();return (m.full_name?.toLowerCase().includes(q)||m.email?.toLowerCase().includes(q))&&(filter==="All"||String(m.status||"").trim().toLowerCase()===filter.toLowerCase());});
   const pendingCount=members.filter(m=>String(m.status||"").trim().toLowerCase()==="pending").length;
   const activeCount=members.filter(m=>String(m.status||"").trim().toLowerCase()==="active").length;
 
   return <div className="space-y-6">
-    {showAddModal&&<MemberModal onClose={()=>setShowAddModal(false)} onSave={fetchData}/>} 
-    {editMember&&<MemberModal member={editMember} onClose={()=>setEditMember(null)} onSave={fetchData}/>} 
+    {showAddModal&&<MemberModal onClose={()=>setShowAddModal(false)} onSave={handleMemberSave}/>} 
+    {editMember&&<MemberModal member={editMember} onClose={()=>setEditMember(null)} onSave={handleMemberSave}/>} 
     {viewMember&&<ViewModal member={viewMember} trainers={trainers} onClose={()=>setViewMember(null)} onEdit={m=>setEditMember(m)} onAssign={handleAssign} onMembershipUpdate={handleMembershipUpdate}/>}
 
     <header className="ave-page-hero rounded-3xl border border-orange-100 px-5 py-6 dark:border-white/5 sm:px-7 sm:py-8"><p className="text-xs font-bold uppercase tracking-[0.16em] text-orange-600 dark:text-orange-400">People management</p><div className="mt-2 flex flex-wrap items-end justify-between gap-4"><div><h1 className="text-3xl font-black text-slate-900 dark:text-white">Members</h1><p className="mt-1 text-sm text-slate-600 dark:text-slate-400">Manage accounts, approvals, fitness profiles, and coach assignments.</p></div></div></header>

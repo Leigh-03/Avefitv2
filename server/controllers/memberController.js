@@ -357,8 +357,15 @@ const updateMember = async (req, res) => {
       weight,
       fitness_goal,
       activity_level,
-      target_weight
+      target_weight,
+      status
     } = req.body;
+
+    // Whitelist the approval statuses the admin is allowed to assign here.
+    const normalizedStatus =
+      typeof status === "string" && ["Pending", "Active", "Inactive", "Rejected"].includes(status)
+        ? status
+        : null;
 
     const result = await pool.query(
       `
@@ -376,8 +383,9 @@ const updateMember = async (req, res) => {
         fitness_goal = COALESCE($10, fitness_goal),
         activity_level = COALESCE($11, activity_level),
         target_weight = COALESCE($12, target_weight),
+        account_status = COALESCE($13, account_status),
         updated_at = CURRENT_TIMESTAMP
-      WHERE user_id = $13
+      WHERE user_id = $14
       RETURNING *
       `,
       [
@@ -393,9 +401,17 @@ const updateMember = async (req, res) => {
         fitness_goal,
         activity_level,
         target_weight,
+        normalizedStatus,
         id
       ]
     );
+
+    if (normalizedStatus) {
+      await pool.query(
+        "UPDATE members SET status = $1 WHERE email = (SELECT email FROM users WHERE user_id = $2)",
+        [normalizedStatus, id]
+      ).catch(() => {});
+    }
 
     if (result.rows.length === 0) {
       return res.status(404).json({
