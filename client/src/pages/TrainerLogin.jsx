@@ -54,6 +54,7 @@ export default function TrainerLogin() {
     >
       <form
         className="space-y-4"
+        autoComplete="off"
         onSubmit={(e) => {
           e.preventDefault();
           handleLogin();
@@ -63,8 +64,8 @@ export default function TrainerLogin() {
           label="Email address"
           htmlFor="trainer-email"
           type="email"
-          name="email"
-          autoComplete="username"
+          name="trainer_email"
+          autoComplete="off"
           placeholder="coach@avefit.com"
           value={form.email}
           onChange={(e) => setForm({ ...form, email: e.target.value })}
@@ -73,8 +74,8 @@ export default function TrainerLogin() {
         <PasswordField
           label="Password"
           htmlFor="trainer-password"
-          name="password"
-          autoComplete="current-password"
+          name="trainer_password"
+          autoComplete="off"
           placeholder="••••••••"
           value={form.password}
           onChange={(e) => setForm({ ...form, password: e.target.value })}

@@ -210,7 +210,7 @@ export default function UserLogin() {
   };
 
   const googleButtonClasses =
-    "flex h-12 w-full items-center justify-center gap-3 rounded-xl border border-slate-200 bg-[#f3f4f6] px-4 text-base font-semibold text-[#111111] shadow-[0_1px_2px_rgba(15,23,42,0.08)] transition hover:border-slate-300 hover:bg-[#e5e7eb] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 focus-visible:ring-offset-2 focus-visible:ring-offset-transparent dark:border-slate-700 dark:bg-[#f3f4f6] dark:text-[#111111] dark:hover:border-slate-400 dark:hover:bg-[#e5e7eb]";
+    "flex h-12 w-full items-center justify-center gap-3 rounded-xl border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 focus-visible:ring-offset-2 focus-visible:ring-offset-transparent";
 
   const GoogleBrandIcon = () => (
     <svg aria-hidden="true" viewBox="0 0 48 48" className="h-6 w-6 shrink-0">

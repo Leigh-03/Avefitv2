@@ -1,9 +1,7 @@
 import { useEffect, useState, useRef } from "react";
-import { UserCheck, Plus, Search, Edit2, XCircle, Users, UserCircle, ChevronDown, ChevronUp, Dumbbell, Trash2, X, Camera, Check } from "lucide-react";
+import { UserCheck, Plus, Search, Edit2, XCircle, Users, UserCircle, X, Camera, Check, Eye, EyeOff } from "lucide-react";
 import api from "../services/api";
 import { fileToCompressedDataUrl } from "../utils/imageUpload";
-
-const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 
 const SPECIALIZATION_OPTIONS = [
   "High-Intensity Interval Training (HIIT)",
@@ -19,7 +17,8 @@ const SPECIALIZATION_OPTIONS = [
   "Group Fitness",
 ];
 
-const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/i;
+const TRAINER_EMAIL_DOMAIN = "@avefit.com";
+const emailLocalPart = (value) => String(value || "").replace(/\s/g, "").split("@")[0];
 
 const normalizeSpecializations = (trainer) => Array.isArray(trainer?.specializations) ? trainer.specializations.filter(Boolean) : [];
 
@@ -30,6 +29,8 @@ const statusColors = {
   Inactive: "bg-slate-100 text-slate-500",
 };
 
+const TRAINER_STATUS_OPTIONS = ["Active", "Inactive"];
+
 function TrainerModal({ trainer, onClose, onSave }) {
   const fileInputRef = useRef(null);
   const [form, setForm] = useState(
@@ -39,8 +40,23 @@ function TrainerModal({ trainer, onClose, onSave }) {
   const [photo, setPhoto] = useState(trainer?.photo_url || null);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+
+  // Active/Inactive are the admin-selectable statuses; keep the trainer's current
+  // value (e.g. Pending/Rejected) selectable so editing never silently changes it.
+  const statusOptions = [...new Set([...(form.status ? [form.status] : []), ...TRAINER_STATUS_OPTIONS])];
+
+  // The exact address the coach will type on the login screen. Surfaced in the
+  // form so an edit can never change the login email without the admin seeing it.
+  const loginUsername = emailLocalPart(form.email);
+  const loginEmail = loginUsername ? `${loginUsername}${TRAINER_EMAIL_DOMAIN}` : "";
+  const storedEmailMismatch =
+    Boolean(trainer?.email) &&
+    Boolean(loginEmail) &&
+    String(trainer.email).trim().toLowerCase() !== loginEmail.toLowerCase();
 
   const handlePhotoChange = async (e) => {
     const file = e.target.files?.[0];
@@ -59,25 +75,100 @@ function TrainerModal({ trainer, onClose, onSave }) {
   };
 
   const handleSubmit = async () => {
-    if (!form.full_name || !form.email) {
-      setError("Full name and email are required.");
+    const fullName = (form.full_name || "").trim();
+    if (!fullName) {
+      setError("Full name is required.");
       return;
     }
-    if (form.email.trim().length > 254 || !EMAIL_PATTERN.test(form.email.trim())) {
-      setError("Please provide a valid email address.");
+    if (fullName.length < 2 || fullName.length > 50) {
+      setError(`Full name must be 2 to 50 characters (currently ${fullName.length}).`);
       return;
     }
-    if (!/^09\d{9}$/.test(form.phone || "")) {
-      setError("Phone number must start with 09 and contain exactly 11 digits.");
+    if (!/^[A-Za-zÀ-ÿ' -]+$/.test(fullName)) {
+      setError("Full name can only contain letters, spaces, apostrophes, and hyphens.");
       return;
     }
+
+    const username = emailLocalPart(form.email);
+    if (!username) {
+      setError(`Enter the email username before ${TRAINER_EMAIL_DOMAIN}.`);
+      return;
+    }
+    if (username.length < 3 || username.length > 64) {
+      setError(`Email username must be 3 to 64 characters (currently ${username.length}).`);
+      return;
+    }
+    if (!/^[A-Za-z0-9](?:[A-Za-z0-9._%+-]*[A-Za-z0-9])?$/.test(username)) {
+      setError("Email username may only use letters, numbers, and . _ % + - and must start and end with a letter or number.");
+      return;
+    }
+
+    const phone = form.phone || "";
+    if (!phone) {
+      setError("Phone number is required.");
+      return;
+    }
+    if (!/^09\d{9}$/.test(phone)) {
+      setError(phone.startsWith("09")
+        ? `Phone number must be exactly 11 digits (currently ${phone.length}).`
+        : "Phone number must start with 09.");
+      return;
+    }
+
+    if (selectedSpecializations.length === 0) {
+      setError("Select at least one specialization for this coach.");
+      return;
+    }
+
+    const bio = (form.bio || "").trim();
+    if (!bio) {
+      setError("Coach bio / profile is required — write a short introduction.");
+      return;
+    }
+    if (bio.length > 500) {
+      setError(`Coach bio must be 500 characters or fewer (currently ${bio.length}).`);
+      return;
+    }
+
+    if (!(form.goal_specialty || "").trim()) {
+      setError("Choose a goal match for the 'Recommended For' field.");
+      return;
+    }
+
+    if (!password && !trainer) {
+      setError("Coach portal password is required for a new trainer.");
+      return;
+    }
+    if (password) {
+      if (password.length < 8 || password.length > 12) {
+        setError(`Password must be 8 to 12 characters (currently ${password.length}).`);
+        return;
+      }
+      if (!/[A-Za-z]/.test(password)) {
+        setError("Password must include at least one letter.");
+        return;
+      }
+      if (!/\d/.test(password)) {
+        setError("Password must include at least one number.");
+        return;
+      }
+      if (!/[^A-Za-z0-9]/.test(password)) {
+        setError("Password must include at least one symbol (for example ! @ # $).");
+        return;
+      }
+      if (password !== confirmPassword) {
+        setError("Passwords do not match. Please retype them.");
+        return;
+      }
+    }
+
     setSaving(true);
     setError("");
     try {
-      const payload = { ...form, specializations: selectedSpecializations, photo_url: photo, ...(password ? { password } : {}) };
+      const payload = { ...form, email: `${username}${TRAINER_EMAIL_DOMAIN}`, specializations: selectedSpecializations, photo_url: photo, ...(password ? { password } : {}) };
       delete payload.specialization;
       if (trainer) {
-        await api.put(`/trainers/${trainer.trainer_id}`, { ...payload, status: trainer.status });
+        await api.put(`/trainers/${trainer.trainer_id}`, { ...payload, status: form.status || trainer.status });
       } else {
         await api.post("/trainers", payload);
       }
@@ -127,42 +218,77 @@ function TrainerModal({ trainer, onClose, onSave }) {
             </div>
           </div>
 
-          {[
-            { label: "Full Name *", key: "full_name", type: "text" },
-            { label: "Email *", key: "email", type: "email" },
-            { label: "Phone *", key: "phone", type: "tel" },
-          ].map((f) => (
-            <div key={f.key}>
-              <label className="block text-sm font-medium text-slate-600 mb-1">{f.label}</label>
+          <div>
+            <label className="block text-sm font-medium text-slate-600 mb-1">Full Name *</label>
+            <input
+              type="text"
+              autoComplete="name"
+              required
+              maxLength={50}
+              placeholder="Juan Dela Cruz"
+              value={form.full_name || ""}
+              onChange={(e) => setForm({ ...form, full_name: e.target.value })}
+              className="w-full border border-slate-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-slate-600 mb-1">Email *</label>
+            <div className="flex items-stretch overflow-hidden rounded-lg border border-slate-300 focus-within:ring-2 focus-within:ring-orange-500">
               <input
-                type={f.type}
-                inputMode={f.key === "phone" ? "numeric" : undefined}
-                autoComplete={f.key === "email" ? "email" : f.key === "phone" ? "tel" : undefined}
+                type="text"
+                autoComplete="off"
                 required
-                maxLength={f.key === "phone" ? 11 : f.key === "email" ? 254 : undefined}
-                minLength={f.key === "phone" ? 11 : undefined}
-                pattern={f.key === "phone" ? "09[0-9]{9}" : undefined}
-                placeholder={f.key === "phone" ? "09XXXXXXXXX" : undefined}
-                value={form[f.key] || ""}
+                spellCheck={false}
+                maxLength={64}
+                placeholder="username"
+                value={emailLocalPart(form.email)}
                 onChange={(e) => {
-                  if (f.key === "phone") {
-                    const digits = e.target.value.replace(/\D/g, "").slice(0, 11);
-                    const phone = digits.startsWith("0")
-                      ? digits.length > 1 && digits[1] !== "9" ? "0" : digits
-                      : "";
-                    setForm({ ...form, phone });
-                    return;
-                  }
-                  setForm({ ...form, [f.key]: e.target.value });
+                  const username = e.target.value.replace(/[^A-Za-z0-9._%+-]/g, "").slice(0, 64);
+                  setForm({ ...form, email: username ? `${username}${TRAINER_EMAIL_DOMAIN}` : "" });
                 }}
-                className="w-full border border-slate-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+                className="min-w-0 flex-1 px-4 py-2.5 text-sm focus:outline-none"
               />
+              <span className="flex select-none items-center border-l border-slate-300 bg-slate-100 px-3 text-sm font-semibold text-slate-500">
+                {TRAINER_EMAIL_DOMAIN}
+              </span>
             </div>
-          ))}
+            <p className="text-xs text-slate-400 mt-1">
+              Coach signs in with <strong className="text-slate-600">{loginEmail || `username${TRAINER_EMAIL_DOMAIN}`}</strong>. The domain cannot be changed.
+            </p>
+            {storedEmailMismatch && (
+              <p className="text-xs text-amber-600 mt-1">
+                Current login email is <strong>{trainer.email}</strong>. Saving changes it to <strong>{loginEmail}</strong> &mdash; tell the coach to use the new address.
+              </p>
+            )}
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-slate-600 mb-1">Phone *</label>
+            <input
+              type="tel"
+              inputMode="numeric"
+              autoComplete="tel"
+              required
+              maxLength={11}
+              minLength={11}
+              pattern="09[0-9]{9}"
+              placeholder="09XXXXXXXXX"
+              value={form.phone || ""}
+              onChange={(e) => {
+                const digits = e.target.value.replace(/\D/g, "").slice(0, 11);
+                const phone = digits.startsWith("0")
+                  ? digits.length > 1 && digits[1] !== "9" ? "0" : digits
+                  : "";
+                setForm({ ...form, phone });
+              }}
+              className="w-full border border-slate-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+            />
+          </div>
 
           <div>
             <div className="flex items-center justify-between mb-2">
-              <label className="block text-sm font-medium text-slate-600">Specializations</label>
+              <label className="block text-sm font-medium text-slate-600">Specializations *</label>
               <span className="text-xs text-slate-400">Choose one or more</span>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-64 overflow-y-auto pr-1">
@@ -190,19 +316,20 @@ function TrainerModal({ trainer, onClose, onSave }) {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-slate-600 mb-1">Coach Bio / Profile</label>
+            <label className="block text-sm font-medium text-slate-600 mb-1">Coach Bio / Profile *</label>
             <textarea
               value={form.bio || ""}
               onChange={(e) => setForm({ ...form, bio: e.target.value })}
               placeholder="Short introduction, coaching approach, and experience..."
               rows={3}
+              maxLength={500}
               className="w-full border border-slate-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 resize-none"
             />
             <p className="text-xs text-slate-400 mt-1">This profile is shown to members when they browse coaches.</p>
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-slate-600 mb-1">Recommended For (goal match)</label>
+            <label className="block text-sm font-medium text-slate-600 mb-1">Recommended For (goal match) *</label>
             <select
               value={form.goal_specialty || ""}
               onChange={(e) => setForm({ ...form, goal_specialty: e.target.value })}
@@ -219,23 +346,58 @@ function TrainerModal({ trainer, onClose, onSave }) {
             </p>
           </div>
 
+          {trainer && (
+            <div>
+              <label className="block text-sm font-medium text-slate-600 mb-1">Status</label>
+              <select
+                value={form.status || ""}
+                onChange={(e) => setForm({ ...form, status: e.target.value })}
+                className="w-full border border-slate-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+              >
+                {statusOptions.map((s) => <option key={s} value={s}>{s}</option>)}
+              </select>
+              <p className="text-xs text-slate-400 mt-1">Set the coach Active or Inactive. Inactive coaches cannot sign in.</p>
+            </div>
+          )}
+
           <div className="pt-2 border-t">
             <label className="block text-sm font-medium text-slate-600 mb-1">
-              Coach Portal Password {trainer && (
+              Coach Portal Password {!trainer && <span className="text-red-500">*</span>} {trainer && (
                 <span className={`ml-1 text-xs font-normal ${trainer.has_portal_access ? "text-green-600" : "text-slate-400"}`}>
                   ({trainer.has_portal_access ? "portal access enabled" : "no portal access yet"})
                 </span>
               )}
             </label>
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder={trainer ? "Leave blank to keep current password" : "Set a login password"}
-              minLength={8}
-              maxLength={12}
-              className="w-full border border-slate-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
-            />
+            <div className="relative">
+              <input
+                type={showPassword ? "text" : "password"}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder={trainer ? "Leave blank to keep current password" : "Set a login password"}
+                minLength={8}
+                maxLength={12}
+                className="w-full border border-slate-300 rounded-lg px-4 py-2.5 pr-11 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword((v) => !v)}
+                aria-label={showPassword ? "Hide password" : "Show password"}
+                className="absolute inset-y-0 right-0 grid w-11 place-items-center text-slate-400 hover:text-slate-600"
+              >
+                {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+              </button>
+            </div>
+            {(password || !trainer) && (
+              <input
+                type={showPassword ? "text" : "password"}
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                placeholder="Confirm password"
+                minLength={8}
+                maxLength={12}
+                className="mt-2 w-full border border-slate-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+              />
+            )}
             <p className="text-xs text-slate-400 mt-1">
               8–12 characters with a letter, number, and symbol. Lets this coach log in at <code>/trainer/login</code>.
             </p>
@@ -395,157 +557,29 @@ function TrainerProfileModal({ trainer, onClose, onEdit }) {
   );
 }
 
-function MemberRow({ member, trainer, exercises }) {
-  const [expanded, setExpanded] = useState(false);
-  const [sessions, setSessions] = useState([]);
-  const [loadingSessions, setLoadingSessions] = useState(false);
-  const [form, setForm] = useState({ exercise_id: "", sets: "", reps: "", duration_minutes: "", session_date: "" });
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
-
-  const dayOptions = member.preferred_days?.length > 0 ? member.preferred_days : DAYS;
-
-  const fetchSessions = () => {
-    setLoadingSessions(true);
-    api.get(`/workouts/member/${member.user_id}`)
-      .then((res) => setSessions(res.data.data || []))
-      .catch((err) => console.error(err))
-      .finally(() => setLoadingSessions(false));
-  };
-
-  const toggleExpand = () => {
-    const next = !expanded;
-    setExpanded(next);
-    if (next && sessions.length === 0) fetchSessions();
-  };
-
-  const handleAssign = async () => {
-    if (!form.exercise_id || !form.session_date) {
-      setError("Please pick an exercise and a day.");
-      return;
-    }
-    setSaving(true);
-    setError("");
-    try {
-      await api.post("/workouts/assign", {
-        ...form,
-        user_id: member.user_id,
-        trainer_id: trainer.trainer_id,
-      });
-      setForm({ exercise_id: "", sets: "", reps: "", duration_minutes: "", session_date: "" });
-      fetchSessions();
-    } catch (err) {
-      setError(err.response?.data?.message || "Failed to assign workout.");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleDeleteSession = async (sessionId) => {
-    await api.delete(`/workouts/session/${sessionId}`);
-    fetchSessions();
-  };
-
+function MemberRow({ member }) {
   return (
-    <div className="border border-[#303030] bg-[#171717] rounded-xl overflow-hidden">
-      <button onClick={toggleExpand} className="w-full flex items-center justify-between px-4 py-3 hover:bg-[#202020] transition text-left">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-full bg-orange-500/15 flex items-center justify-center text-orange-400 font-bold text-xs">
-            {member.first_name?.charAt(0)}{member.last_name?.charAt(0)}
-          </div>
-          <div>
-            <p className="font-semibold text-gray-100 text-sm">{member.first_name} {member.last_name}</p>
-            <p className="text-gray-400 text-xs">{member.fitness_goal || "No goal set"} · {member.email}</p>
-          </div>
+    <div className="border border-[#303030] bg-[#171717] rounded-xl px-4 py-3">
+      <div className="flex items-center gap-3">
+        <div className="w-8 h-8 rounded-full bg-orange-500/15 flex items-center justify-center text-orange-400 font-bold text-xs">
+          {member.first_name?.charAt(0)}{member.last_name?.charAt(0)}
         </div>
-        {expanded ? <ChevronUp size={18} className="text-gray-400" /> : <ChevronDown size={18} className="text-gray-400" />}
-      </button>
-
-      {expanded && (
-        <div className="px-4 pb-4 border-t border-[#303030] bg-[#1d1d1d]">
-          {/* Assign form */}
-          <div className="pt-4 grid grid-cols-2 sm:grid-cols-5 gap-2 items-end">
-            <div className="col-span-2 sm:col-span-2">
-              <label className="block text-xs text-gray-400 mb-1">Exercise</label>
-              <select value={form.exercise_id} onChange={(e) => setForm({ ...form, exercise_id: e.target.value })}
-                className="w-full border border-[#3a3a3a] bg-[#111] text-gray-100 rounded-lg px-2 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-orange-500/60">
-                <option value="">Select...</option>
-                {exercises.map((e) => (
-                  <option key={e.exercise_id} value={e.exercise_id}>{e.exercise_name}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs text-gray-400 mb-1">Sets</label>
-              <input type="number" value={form.sets} onChange={(e) => setForm({ ...form, sets: e.target.value })}
-                className="w-full border border-[#3a3a3a] bg-[#111] text-gray-100 rounded-lg px-2 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-orange-500/60" />
-            </div>
-            <div>
-              <label className="block text-xs text-gray-400 mb-1">Reps</label>
-              <input type="number" value={form.reps} onChange={(e) => setForm({ ...form, reps: e.target.value })}
-                className="w-full border border-[#3a3a3a] bg-[#111] text-gray-100 rounded-lg px-2 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-orange-500/60" />
-            </div>
-            <div>
-              <label className="block text-xs text-gray-400 mb-1">Day</label>
-              <select value={form.session_date} onChange={(e) => setForm({ ...form, session_date: e.target.value })}
-                className="w-full border border-[#3a3a3a] bg-[#111] text-gray-100 rounded-lg px-2 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-orange-500/60">
-                <option value="">Select...</option>
-                {dayOptions.map((d) => <option key={d} value={d}>{d}</option>)}
-              </select>
-            </div>
-          </div>
-          {error && <p className="text-red-500 text-xs mt-2">{error}</p>}
-          <button onClick={handleAssign} disabled={saving}
-            className="mt-3 flex items-center gap-1 bg-orange-600 hover:bg-orange-700 disabled:opacity-50 text-white text-xs font-medium px-3 py-2 rounded-lg transition">
-            <Plus size={14} /> {saving ? "Assigning..." : "Assign Workout"}
-          </button>
-
-          {/* Assigned sessions */}
-          <div className="mt-4">
-            <p className="text-xs font-semibold text-gray-400 mb-2">Assigned Workouts</p>
-            {loadingSessions ? (
-              <p className="text-xs text-gray-500">Loading...</p>
-            ) : sessions.length === 0 ? (
-              <p className="text-xs text-gray-500">No workouts assigned yet.</p>
-            ) : (
-              <div className="space-y-1.5">
-                {sessions.map((s) => (
-                  <div key={s.session_id} className="flex items-center justify-between bg-[#111] border border-[#303030] rounded-lg px-3 py-2">
-                    <div className="flex items-center gap-2 text-xs">
-                      <Dumbbell size={14} className="text-orange-500" />
-                      <span className="font-medium text-gray-200">{s.exercise_name || "Exercise"}</span>
-                      <span className="text-gray-400">· {s.session_date}</span>
-                      {s.sets && <span className="text-gray-400">· {s.sets}x{s.reps || "?"}</span>}
-                      {s.completed && <span className="text-green-500 font-medium">✓ Done</span>}
-                    </div>
-                    <button onClick={() => handleDeleteSession(s.session_id)} className="text-red-400 hover:text-red-600">
-                      <Trash2 size={14} />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
+        <div>
+          <p className="font-semibold text-gray-100 text-sm">{member.first_name} {member.last_name}</p>
+          <p className="text-gray-400 text-xs">{member.fitness_goal || "No goal set"} · {member.email}</p>
         </div>
-      )}
+      </div>
     </div>
   );
 }
 
 function RosterModal({ trainer, onClose }) {
   const [members, setMembers] = useState([]);
-  const [exercises, setExercises] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    Promise.all([
-      api.get(`/trainers/${trainer.trainer_id}/roster`),
-      api.get("/workouts"),
-    ])
-      .then(([rosterRes, exercisesRes]) => {
-        setMembers(rosterRes.data.data || []);
-        setExercises(exercisesRes.data.data || []);
-      })
+    api.get(`/trainers/${trainer.trainer_id}/roster`)
+      .then((rosterRes) => setMembers(rosterRes.data.data || []))
       .catch((err) => console.error(err))
       .finally(() => setLoading(false));
   }, [trainer.trainer_id]);
@@ -558,7 +592,7 @@ function RosterModal({ trainer, onClose }) {
             <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
               <Users size={20} className="text-orange-500" /> {trainer.full_name}'s Roster
             </h2>
-            <p className="text-slate-500 text-sm mt-0.5">Assign workouts to each member's weekly schedule.</p>
+            <p className="text-slate-500 text-sm mt-0.5">Members assigned to this coach.</p>
           </div>
           <button onClick={onClose}><X size={20} className="text-slate-400" /></button>
         </div>
@@ -571,7 +605,7 @@ function RosterModal({ trainer, onClose }) {
           ) : members.length === 0 ? (
             <p className="text-center text-slate-400 py-12 text-sm">No members have chosen this coach yet.</p>
           ) : (
-            members.map((m) => <MemberRow key={m.user_id} member={m} trainer={trainer} exercises={exercises} />)
+            members.map((m) => <MemberRow key={m.user_id} member={m} />)
           )}
         </div>
       </div>

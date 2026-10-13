@@ -67,12 +67,24 @@ function PlanModal({ members, exercises, onClose, onSave }) {
     setFieldErrors((current) => ({ ...current, [field]: message }));
   };
 
-  const positiveIntegerError = (value, label) => {
+  const integerRangeError = (value, label, min, max) => {
     if (String(value).trim() === "") return `${label} is required.`;
-    if (!Number.isInteger(Number(value)) || Number(value) < 1) {
-      return `${label} must be a whole number greater than 0.`;
-    }
+    const number = Number(value);
+    if (!Number.isFinite(number)) return `Enter a valid number for ${label.toLowerCase()}.`;
+    if (!Number.isInteger(number)) return `${label} must be a whole number.`;
+    if (number < min) return `${label} must be at least ${min}.`;
+    if (number > max) return `${label} cannot be more than ${max}.`;
     return "";
+  };
+
+  const getSessionErrors = (session, index) => {
+    const errors = {};
+    if (!session.exercise_id) errors[`sessions.${index}.exercise_id`] = "Select an exercise.";
+    const setsError = integerRangeError(session.sets, "Sets", 1, 6);
+    if (setsError) errors[`sessions.${index}.sets`] = setsError;
+    const repsError = integerRangeError(session.reps, "Reps", 3, 16);
+    if (repsError) errors[`sessions.${index}.reps`] = repsError;
+    return errors;
   };
 
   const handleSubmit = async () => {
@@ -85,18 +97,12 @@ function PlanModal({ members, exercises, onClose, onSave }) {
     if (form.sessions.length === 0) nextErrors.sessions = "Add at least one exercise.";
 
     form.sessions.forEach((session, index) => {
-      if (!session.exercise_id) nextErrors[`sessions.${index}.exercise_id`] = "Choose an exercise.";
-      const setsError = positiveIntegerError(session.sets, "Sets");
-      if (setsError) nextErrors[`sessions.${index}.sets`] = setsError;
-      const repsError = positiveIntegerError(session.reps, "Reps");
-      if (repsError) nextErrors[`sessions.${index}.reps`] = repsError;
-      const durationError = positiveIntegerError(session.duration_minutes, "Minutes");
-      if (durationError) nextErrors[`sessions.${index}.duration_minutes`] = durationError;
+      Object.assign(nextErrors, getSessionErrors(session, index));
     });
 
     setFieldErrors(nextErrors);
     if (Object.keys(nextErrors).length > 0) {
-      setError("Please correct the highlighted fields.");
+      setError("Some fields need attention. Review the highlighted messages below.");
       return;
     }
 
@@ -106,11 +112,10 @@ function PlanModal({ members, exercises, onClose, onSave }) {
       await trainerApi.post("/me/workout-plans", {
         ...form,
         plan_name: planName,
-        sessions: form.sessions.map(({ exercise_id, sets, reps, duration_minutes }) => ({
+        sessions: form.sessions.map(({ exercise_id, sets, reps }) => ({
           exercise_id,
           sets,
           reps,
-          duration_minutes,
         })),
       });
       await onSave();
@@ -126,7 +131,7 @@ function PlanModal({ members, exercises, onClose, onSave }) {
     `trainer-field w-full rounded-lg px-4 py-2.5 text-sm ${fieldErrors[field] ? "border border-red-500 focus:border-red-500" : ""}`;
 
   const renderFieldError = (field) => fieldErrors[field] ? (
-    <p className="mt-1 text-xs text-red-500" role="alert">{fieldErrors[field]}</p>
+    <p id={`${field.replaceAll(".", "-")}-error`} className="mt-1 text-xs leading-snug text-red-500" role="alert">{fieldErrors[field]}</p>
   ) : null;
 
   const updateSessionField = (index, field, value) => {
@@ -138,9 +143,12 @@ function PlanModal({ members, exercises, onClose, onSave }) {
     }));
     const key = `sessions.${index}.${field}`;
     const fieldError = field === "exercise_id"
-      ? (value ? "" : "Choose an exercise.")
-      : positiveIntegerError(value, field === "duration_minutes" ? "Minutes" : field === "sets" ? "Sets" : "Reps");
+      ? (value ? "" : "Select an exercise.")
+      : field === "sets"
+        ? integerRangeError(value, "Sets", 1, 6)
+        : integerRangeError(value, "Reps", 3, 16);
     setFieldErrors((current) => ({ ...current, sessions: "", [key]: fieldError }));
+    setError("");
   };
 
   return (
@@ -302,11 +310,23 @@ function PlanModal({ members, exercises, onClose, onSave }) {
               <button
                 type="button"
                 onClick={() => {
+                  const lastIndex = form.sessions.length - 1;
+                  if (lastIndex >= 0) {
+                    const errors = getSessionErrors(form.sessions[lastIndex], lastIndex);
+                    if (Object.keys(errors).length > 0) {
+                      setFieldErrors((current) => ({ ...current, ...errors }));
+                      setError("Complete the highlighted exercise fields before adding another exercise.");
+                      const firstInvalidField = Object.keys(errors)[0];
+                      document.getElementById(firstInvalidField.replaceAll(".", "-"))?.focus();
+                      return;
+                    }
+                  }
                   setForm({
                     ...form,
-                    sessions: [...form.sessions, { exercise_id: "", sets: "", reps: "", duration_minutes: "" }],
+                    sessions: [...form.sessions, { exercise_id: "", sets: "", reps: "" }],
                   });
                   setFieldError("sessions", "");
+                  setError("");
                 }}
                 className="flex items-center gap-1 rounded-lg border border-orange-500/30 px-3 py-2 text-xs font-semibold text-orange-500 hover:bg-orange-500/10"
               >
@@ -315,14 +335,16 @@ function PlanModal({ members, exercises, onClose, onSave }) {
             </div>
             <div className="space-y-3">
               {form.sessions.map((session, index) => (
-                <div key={`session-${index}`} className="grid grid-cols-2 gap-2 rounded-xl border border-slate-200 p-3 dark:border-slate-800 sm:grid-cols-[minmax(0,1fr)_76px_76px_90px_36px]">
+                <div key={`session-${index}`} className="grid grid-cols-2 items-start gap-2 rounded-xl border border-slate-200 p-3 dark:border-slate-800 sm:grid-cols-[minmax(0,1fr)_104px_104px_36px]">
                   <div className="col-span-2 sm:col-span-1">
                     <select
+                      id={`sessions-${index}-exercise_id`}
                       aria-label={`Exercise ${index + 1}`}
                       value={session.exercise_id}
                       required
                       onChange={(event) => updateSessionField(index, "exercise_id", event.target.value)}
                       aria-invalid={Boolean(fieldErrors[`sessions.${index}.exercise_id`])}
+                      aria-describedby={fieldErrors[`sessions.${index}.exercise_id`] ? `sessions-${index}-exercise_id-error` : undefined}
                       className={`${inputClass(`sessions.${index}.exercise_id`)} px-3 py-2`}
                     >
                       <option value="">Select exercise...</option>
@@ -332,42 +354,44 @@ function PlanModal({ members, exercises, onClose, onSave }) {
                     </select>
                     {renderFieldError(`sessions.${index}.exercise_id`)}
                   </div>
-                  <input
-                    aria-label={`Exercise ${index + 1} sets`}
-                    type="number"
-                    min="1"
-                    step="1"
-                    required
-                    placeholder="Sets"
-                    value={session.sets}
-                    onChange={(event) => updateSessionField(index, "sets", event.target.value)}
-                    aria-invalid={Boolean(fieldErrors[`sessions.${index}.sets`])}
-                    className={`${inputClass(`sessions.${index}.sets`)} px-3 py-2`}
-                  />
-                  <input
-                    aria-label={`Exercise ${index + 1} reps`}
-                    type="number"
-                    min="1"
-                    step="1"
-                    required
-                    placeholder="Reps"
-                    value={session.reps}
-                    onChange={(event) => updateSessionField(index, "reps", event.target.value)}
-                    aria-invalid={Boolean(fieldErrors[`sessions.${index}.reps`])}
-                    className={`${inputClass(`sessions.${index}.reps`)} px-3 py-2`}
-                  />
-                  <input
-                    aria-label={`Exercise ${index + 1} duration in minutes`}
-                    type="number"
-                    min="1"
-                    step="1"
-                    required
-                    placeholder="Minutes *"
-                    value={session.duration_minutes}
-                    onChange={(event) => updateSessionField(index, "duration_minutes", event.target.value)}
-                    aria-invalid={Boolean(fieldErrors[`sessions.${index}.duration_minutes`])}
-                    className={`${inputClass(`sessions.${index}.duration_minutes`)} px-3 py-2`}
-                  />
+                  <div className="min-w-0">
+                    <label htmlFor={`sessions-${index}-sets`} className="mb-1 block text-xs font-medium text-slate-500">Sets <span className="text-slate-400">(1–6)</span></label>
+                    <input
+                      id={`sessions-${index}-sets`}
+                      aria-label={`Exercise ${index + 1} sets`}
+                      type="number"
+                      min="1"
+                      max="6"
+                      step="1"
+                      required
+                      placeholder="Sets"
+                      value={session.sets}
+                      onChange={(event) => updateSessionField(index, "sets", event.target.value)}
+                      aria-invalid={Boolean(fieldErrors[`sessions.${index}.sets`])}
+                      aria-describedby={fieldErrors[`sessions.${index}.sets`] ? `sessions-${index}-sets-error` : undefined}
+                      className={`${inputClass(`sessions.${index}.sets`)} px-3 py-2`}
+                    />
+                    {renderFieldError(`sessions.${index}.sets`)}
+                  </div>
+                  <div className="min-w-0">
+                    <label htmlFor={`sessions-${index}-reps`} className="mb-1 block text-xs font-medium text-slate-500">Reps <span className="text-slate-400">(3–16)</span></label>
+                    <input
+                      id={`sessions-${index}-reps`}
+                      aria-label={`Exercise ${index + 1} reps`}
+                      type="number"
+                      min="3"
+                      max="16"
+                      step="1"
+                      required
+                      placeholder="Reps"
+                      value={session.reps}
+                      onChange={(event) => updateSessionField(index, "reps", event.target.value)}
+                      aria-invalid={Boolean(fieldErrors[`sessions.${index}.reps`])}
+                      aria-describedby={fieldErrors[`sessions.${index}.reps`] ? `sessions-${index}-reps-error` : undefined}
+                      className={`${inputClass(`sessions.${index}.reps`)} px-3 py-2`}
+                    />
+                    {renderFieldError(`sessions.${index}.reps`)}
+                  </div>
                   <button
                     type="button"
                     onClick={() => {

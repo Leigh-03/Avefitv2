@@ -9,6 +9,47 @@ const difficultyColors = {
   Advanced: "bg-red-500/20 text-red-400",
 };
 
+const MUSCLE_GROUPS = ["Chest", "Back", "Shoulders", "Biceps", "Triceps", "Legs", "Glutes", "Core", "Cardio", "Full Body"];
+const EQUIPMENT_OPTIONS = ["Barbell", "Dumbbell", "Cable Machine", "Machine", "Smith Machine", "Kettlebell", "EZ Bar", "Bodyweight", "Pull-Up Bar", "Dip Station", "Roman Chair", "Landmine Attachment", "T-Bar Row Machine", "Assisted Pull-Up Machine", "Preacher Bench", "Leg Press Machine", "Hack Squat Machine", "Weight Plate", "Decline Bench", "Treadmill", "Stationary Bike", "Rowing Machine", "Stair Climber Machine", "Elliptical Machine", "Assault Bike", "Battle Ropes", "Jump Rope", "Sled", "TRX Suspension Trainer", "Medicine Ball", "Plyo Box"];
+const STEP_TITLES = ["Starting Position", "Movement", "Finish"];
+
+// Letters + spaces only for the name, plus punctuation real names already use
+// (Pull-Up, Farmer's Carry, Weighted Dips (Chest Focus)). Blocks digits.
+const NAME_PATTERN = /^[A-Za-z][A-Za-z\s'().,&-]*$/;
+// Letters/spaces + normal sentence punctuation. Blocks digits.
+const TEXT_PATTERN = /^[A-Za-z][A-Za-z\s.,'’\-()/:;]*$/;
+
+const inputClass = (hasError) =>
+  `w-full border rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 ${
+    hasError ? "border-red-400 focus:ring-red-500" : "border-slate-300 focus:ring-orange-500"
+  }`;
+
+const validateName = (value) => {
+  const v = String(value || "").trim();
+  if (!v) return "Exercise name is required.";
+  if (!NAME_PATTERN.test(v)) return "Exercise name may only contain letters, spaces, and simple punctuation (no numbers).";
+  return "";
+};
+
+const validateText = (value, label) => {
+  const v = String(value || "").trim();
+  if (!v) return `${label} is required.`;
+  if (v.length < 5) return `${label} must be at least 5 letters.`;
+  if (v.length > 500) return `${label} must be 500 letters or fewer.`;
+  if (!TEXT_PATTERN.test(v)) return `${label} may only contain letters, spaces, and punctuation (no numbers).`;
+  return "";
+};
+
+const validateCalories = (value) => {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "Calories per minute is required.";
+  if (!/^\d+(\.\d{1,2})?$/.test(raw)) return "Calories per minute must be a number only (no symbols).";
+  const n = Number(raw);
+  if (n < 2) return "Calories per minute must be at least 2.00.";
+  if (n > 12) return "Calories per minute cannot be more than 12.00.";
+  return "";
+};
+
 const emptySteps = () => [
   { title: "Starting Position", description: "" },
   { title: "Movement", description: "" },
@@ -27,36 +68,60 @@ function ExerciseModal({ exercise, categories, onClose, onSave }) {
       : emptySteps()
   );
   const [saving, setSaving] = useState(false);
+  const [errors, setErrors] = useState({});
   const [error, setError] = useState("");
+
+  // Keep any legacy/custom value selectable when editing an existing exercise.
+  const muscleGroupOptions = [...new Set([...(form.muscle_group ? [form.muscle_group] : []), ...MUSCLE_GROUPS])];
+  const equipmentOptions = [...new Set([...(form.equipment ? [form.equipment] : []), ...EQUIPMENT_OPTIONS])];
 
   const updateStep = (i, field, value) => {
     setSteps((prev) => prev.map((s, idx) => (idx === i ? { ...s, [field]: value } : s)));
   };
 
+  const buildErrors = () => {
+    const next = {};
+    const nameError = validateName(form.exercise_name);
+    if (nameError) next.exercise_name = nameError;
+    if (!form.category_id) next.category_id = "Category is required.";
+    if (!form.muscle_group) next.muscle_group = "Muscle group is required.";
+    if (!form.equipment) next.equipment = "Equipment is required.";
+    const calorieError = validateCalories(form.calories_per_minute);
+    if (calorieError) next.calories_per_minute = calorieError;
+    const descriptionError = validateText(form.description, "Description");
+    if (descriptionError) next.description = descriptionError;
+    steps.forEach((step, i) => {
+      const stepError = validateText(step.description, STEP_TITLES[i]);
+      if (stepError) next[`step_${i}`] = stepError;
+    });
+    return next;
+  };
+
   const handleSubmit = async () => {
-    if (!form.exercise_name || !form.muscle_group) {
-      setError("Exercise name and muscle group are required.");
-      return;
-    }
-    setSaving(true);
+    const nextErrors = buildErrors();
+    setErrors(nextErrors);
     setError("");
+    if (Object.keys(nextErrors).length > 0) return;
+    setSaving(true);
     try {
       // The exercise visuals now come from the bundled Workout Guide repository.
-      // Keep only AveFit's exercise metadata and optional coaching notes in the database.
-      const hasTutorial = steps.some((s) => s.description.trim());
+      // Keep only AveFit's exercise metadata and coaching notes in the database.
       const {
         exercise_name, category_id, muscle_group, difficulty,
         calories_per_minute, description, equipment
       } = form;
       const payload = {
-        exercise_name,
+        exercise_name: exercise_name.trim(),
         category_id,
         muscle_group,
         difficulty,
         calories_per_minute,
-        description,
+        description: description.trim(),
         equipment,
-        movement_steps: hasTutorial ? steps : null,
+        movement_steps: steps.map((step, i) => ({
+          title: STEP_TITLES[i],
+          description: step.description.trim(),
+        })),
       };
       if (exercise) {
         await api.put(`/workouts/${exercise.exercise_id}`, payload);
@@ -88,27 +153,41 @@ function ExerciseModal({ exercise, categories, onClose, onSave }) {
               <label className="block text-sm font-medium text-slate-600 mb-1">Exercise Name *</label>
               <input type="text" value={form.exercise_name}
                 onChange={(e) => setForm({ ...form, exercise_name: e.target.value })}
-                className="w-full border border-slate-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500" />
+                aria-invalid={Boolean(errors.exercise_name)}
+                className={inputClass(errors.exercise_name)} />
+              {errors.exercise_name && <p className="mt-1 text-xs text-red-500">{errors.exercise_name}</p>}
             </div>
             <div>
-              <label className="block text-sm font-medium text-slate-600 mb-1">Category</label>
+              <label className="block text-sm font-medium text-slate-600 mb-1">Category *</label>
               <select value={form.category_id || ""} onChange={(e) => setForm({ ...form, category_id: e.target.value })}
-                className="w-full border border-slate-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500">
+                aria-invalid={Boolean(errors.category_id)}
+                className={inputClass(errors.category_id)}>
                 <option value="">Select category...</option>
                 {categories.map((c) => <option key={c.category_id} value={c.category_id}>{c.category_name}</option>)}
               </select>
+              {errors.category_id && <p className="mt-1 text-xs text-red-500">{errors.category_id}</p>}
             </div>
             <div>
               <label className="block text-sm font-medium text-slate-600 mb-1">Muscle Group *</label>
-              <input type="text" value={form.muscle_group}
+              <select value={form.muscle_group || ""}
                 onChange={(e) => setForm({ ...form, muscle_group: e.target.value })}
-                className="w-full border border-slate-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500" />
+                aria-invalid={Boolean(errors.muscle_group)}
+                className={inputClass(errors.muscle_group)}>
+                <option value="">Select muscle group...</option>
+                {muscleGroupOptions.map((m) => <option key={m} value={m}>{m}</option>)}
+              </select>
+              {errors.muscle_group && <p className="mt-1 text-xs text-red-500">{errors.muscle_group}</p>}
             </div>
             <div>
-              <label className="block text-sm font-medium text-slate-600 mb-1">Equipment</label>
-              <input type="text" value={form.equipment || ""}
+              <label className="block text-sm font-medium text-slate-600 mb-1">Equipment *</label>
+              <select value={form.equipment || ""}
                 onChange={(e) => setForm({ ...form, equipment: e.target.value })}
-                className="w-full border border-slate-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500" />
+                aria-invalid={Boolean(errors.equipment)}
+                className={inputClass(errors.equipment)}>
+                <option value="">Select equipment...</option>
+                {equipmentOptions.map((eq) => <option key={eq} value={eq}>{eq}</option>)}
+              </select>
+              {errors.equipment && <p className="mt-1 text-xs text-red-500">{errors.equipment}</p>}
             </div>
             <div>
               <label className="block text-sm font-medium text-slate-600 mb-1">Difficulty</label>
@@ -120,28 +199,32 @@ function ExerciseModal({ exercise, categories, onClose, onSave }) {
               </select>
             </div>
             <div>
-              <label className="block text-sm font-medium text-slate-600 mb-1">Calories / min</label>
-              <input type="number" value={form.calories_per_minute || ""}
+              <label className="block text-sm font-medium text-slate-600 mb-1">Calories / min *</label>
+              <input type="number" min="2" max="12" step="0.01" inputMode="decimal" value={form.calories_per_minute ?? ""}
                 onChange={(e) => setForm({ ...form, calories_per_minute: e.target.value })}
-                className="w-full border border-slate-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500" />
+                aria-invalid={Boolean(errors.calories_per_minute)}
+                className={inputClass(errors.calories_per_minute)} />
+              {errors.calories_per_minute && <p className="mt-1 text-xs text-red-500">{errors.calories_per_minute}</p>}
             </div>
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-slate-600 mb-1">Description</label>
+            <label className="block text-sm font-medium text-slate-600 mb-1">Description *</label>
             <textarea rows={2} value={form.description || ""}
               onChange={(e) => setForm({ ...form, description: e.target.value })}
-              className="w-full border border-slate-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500" />
+              aria-invalid={Boolean(errors.description)}
+              className={inputClass(errors.description)} />
+            {errors.description && <p className="mt-1 text-xs text-red-500">{errors.description}</p>}
           </div>
 
           {/* Movement Tutorial — 3 steps */}
           <div className="pt-2 border-t">
             <div className="flex items-center gap-2 mb-1">
               <ListOrdered size={16} className="text-orange-600" />
-              <label className="text-sm font-semibold text-slate-700">Movement Tutorial (3 steps)</label>
+              <label className="text-sm font-semibold text-slate-700">Movement Tutorial (3 steps) *</label>
             </div>
             <p className="text-xs text-slate-400 mb-3">
-              Shown to members as a step-by-step guide for performing this exercise correctly.
+              Shown to members as a step-by-step guide. Each step needs 5–500 letters and no numbers.
             </p>
             <div className="space-y-3">
               {steps.map((step, i) => (
@@ -150,21 +233,17 @@ function ExerciseModal({ exercise, categories, onClose, onSave }) {
                     <span className="w-5 h-5 rounded-full bg-orange-600 text-white text-xs font-bold flex items-center justify-center shrink-0">
                       {i + 1}
                     </span>
-                    <input
-                      type="text"
-                      value={step.title}
-                      onChange={(e) => updateStep(i, "title", e.target.value)}
-                      placeholder={`Step ${i + 1} title`}
-                      className="flex-1 bg-white border border-slate-300 rounded-lg px-3 py-1.5 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-orange-500"
-                    />
+                    <span className="flex-1 text-sm font-semibold text-slate-700">{STEP_TITLES[i]}</span>
                   </div>
                   <textarea
                     rows={2}
                     value={step.description}
                     onChange={(e) => updateStep(i, "description", e.target.value)}
                     placeholder="Describe what to do in this phase of the movement..."
-                    className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+                    aria-invalid={Boolean(errors[`step_${i}`])}
+                    className={inputClass(errors[`step_${i}`])}
                   />
+                  {errors[`step_${i}`] && <p className="mt-1 text-xs text-red-500">{errors[`step_${i}`]}</p>}
                 </div>
               ))}
             </div>

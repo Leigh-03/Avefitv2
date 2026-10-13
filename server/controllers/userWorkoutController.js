@@ -65,10 +65,20 @@ const updateWorkoutSession = async (req, res) => {
   try {
     const { id } = req.params;
     const { sets, reps, duration_minutes, completed } = req.body;
-    await pool.query(`
-      UPDATE workout_sessions SET sets=$1, reps=$2, duration_minutes=$3, completed=$4
-      WHERE session_id=$5
-    `, [sets, reps, duration_minutes, completed || false, id]);
+    const result = await pool.query(`
+      UPDATE workout_sessions ws
+      SET sets=$1, reps=$2, duration_minutes=$3, completed=$4
+      FROM workout_plans wp
+      WHERE ws.session_id=$5
+        AND ws.workout_plan_id = wp.workout_plan_id
+        AND wp.user_id = $6
+      RETURNING ws.session_id
+    `, [sets, reps, duration_minutes, completed || false, id, req.user.user_id]);
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ success: false, message: "Workout not found." });
+    }
+
     res.json({ success: true, message: "Workout updated." });
   } catch (err) {
     console.error("updateWorkoutSession error:", err.message);
@@ -130,7 +140,20 @@ const completeSession = async (req, res) => {
 const deleteWorkoutSession = async (req, res) => {
   try {
     const { id } = req.params;
-    await pool.query("DELETE FROM workout_sessions WHERE session_id=$1", [id]);
+
+    const result = await pool.query(`
+      DELETE FROM workout_sessions ws
+      USING workout_plans wp
+      WHERE ws.session_id = $1
+        AND ws.workout_plan_id = wp.workout_plan_id
+        AND wp.user_id = $2
+      RETURNING ws.session_id
+    `, [id, req.user.user_id]);
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ success: false, message: "Workout not found." });
+    }
+
     res.json({ success: true, message: "Workout deleted." });
   } catch (err) {
     console.error("deleteWorkoutSession error:", err.message);

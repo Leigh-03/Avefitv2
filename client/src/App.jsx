@@ -11,7 +11,6 @@ import Dashboard from "./pages/Dashboard";
 import Members from "./pages/Members";
 import Trainers from "./pages/Trainers";
 import Workouts from "./pages/Workouts";
-import WorkoutPlans from "./pages/WorkoutPlans";
 import Nutrition from "./pages/Nutrition";
 import Analytics from "./pages/Analytics";
 import Settings from "./pages/Settings";
@@ -101,7 +100,6 @@ export default function App() {
                   <Route path="/members" element={<Members />} />
                   <Route path="/trainers" element={<Trainers />} />
                   <Route path="/workouts" element={<Workouts />} />
-                  <Route path="/workout-plans" element={<WorkoutPlans />} />
                   <Route path="/nutrition" element={<Nutrition />} />
                   <Route path="/analytics" element={<Analytics />} />
                   <Route path="/notifications" element={<Notifications />} />

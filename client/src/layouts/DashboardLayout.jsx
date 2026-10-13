@@ -3,7 +3,6 @@ import { useLocation, useNavigate } from "react-router-dom";
 import {
   BarChart3,
   Bell,
-  ClipboardList,
   Dumbbell,
   Home,
   Settings,
@@ -18,7 +17,6 @@ const NAV = [
   { to: "/admin/members", icon: Users, label: "Members" },
   { to: "/admin/trainers", icon: UserCheck, label: "Trainers" },
   { to: "/admin/workouts", icon: Dumbbell, label: "Exercises" },
-  { to: "/admin/workout-plans", icon: ClipboardList, label: "Workout Plans" },
   { to: "/admin/analytics", icon: BarChart3, label: "Analytics" },
   { to: "/admin/notifications", icon: Bell, label: "Notifications", badge: true },
   { to: "/admin/settings", icon: Settings, label: "Settings" },
@@ -29,7 +27,6 @@ const PAGE_TITLES = {
   "/admin/members": "Members",
   "/admin/trainers": "Trainers",
   "/admin/workouts": "Exercises",
-  "/admin/workout-plans": "Workout Plans",
   "/admin/nutrition": "Meal Plans",
   "/admin/analytics": "Analytics",
   "/admin/notifications": "Notifications",

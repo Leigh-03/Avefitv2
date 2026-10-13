@@ -13,6 +13,14 @@ const getWorkoutDate = (session) => {
   return philippinesDateKey(value);
 };
 
+const weightInput = (val, prev = "") => {
+  const cleaned = String(val || "").replace(/[^0-9.]/g, "").replace(/(\..*)\./g, "$1");
+  if (!cleaned) return "";
+  const num = Number(cleaned);
+  if (!(num > 0) || num > 200) return prev;
+  return cleaned;
+};
+
 export default function ProgressPage() {
   const { user } = useUserAuth();
   const [logs, setLogs] = useState([]);
@@ -23,14 +31,16 @@ export default function ProgressPage() {
   const [analyticsPeriod, setAnalyticsPeriod] = useState("weekly");
 
   // Log form
-  const [logForm, setLogForm] = useState({ weight: "", bmi: "", body_fat: "", waist: "" });
+  const [logForm, setLogForm] = useState({ weight: "", bmi: "" });
   const [logging, setLogging] = useState(false);
   const [logMsg, setLogMsg] = useState("");
+  const [logError, setLogError] = useState("");
 
   // Prediction form
-  const [predForm, setPredForm] = useState({ current_weight: "", goal_weight: "", weekly_loss: "" });
+  const [predForm, setPredForm] = useState({ current_weight: "", goal_weight: "" });
   const [predResult, setPredResult] = useState(null);
   const [predicting, setPredicting] = useState(false);
+  const [predError, setPredError] = useState("");
 
   const fetchProgress = useCallback(async () => {
     setLoading(true);
@@ -56,24 +66,30 @@ export default function ProgressPage() {
 
   // Auto-calc BMI when weight changes
   const handleWeightChange = (val) => {
+    const cleaned = weightInput(val, logForm.weight);
     setLogForm((f) => {
       const h = parseFloat(user?.height);
       let bmi = "";
-      if (h && val) {
+      if (h && cleaned) {
         const hm = h / 100;
-        bmi = (parseFloat(val) / (hm * hm)).toFixed(1);
+        bmi = (parseFloat(cleaned) / (hm * hm)).toFixed(1);
       }
-      return { ...f, weight: val, bmi };
+      return { ...f, weight: cleaned, bmi };
     });
   };
 
   const handleLogProgress = async () => {
-    if (!logForm.weight) return;
+    const w = Number(logForm.weight);
+    if (!logForm.weight || !Number.isFinite(w) || w < 20 || w > 200) {
+      setLogError("Weight must be between 20 kg and 200 kg.");
+      return;
+    }
+    setLogError("");
     setLogging(true);
     try {
       await userApi.post("/progress", logForm);
       setLogMsg("Progress logged!");
-      setLogForm({ weight: "", bmi: "", body_fat: "", waist: "" });
+      setLogForm({ weight: "", bmi: "" });
       await fetchProgress();
       setTimeout(() => setLogMsg(""), 3000);
     } catch (err) {
@@ -85,16 +101,47 @@ export default function ProgressPage() {
   };
 
   const handlePredict = async () => {
-    if (!predForm.current_weight || !predForm.goal_weight || !predForm.weekly_loss) return;
+    if (!predForm.current_weight || !predForm.goal_weight) {
+      setPredError("Enter both current and goal weight.");
+      return;
+    }
+    const cw = Number(predForm.current_weight);
+    const gw = Number(predForm.goal_weight);
+    if (!Number.isFinite(cw) || cw < 20 || cw > 200) {
+      setPredError("Current weight must be between 20 kg and 200 kg.");
+      return;
+    }
+    if (!Number.isFinite(gw) || gw < 20 || gw > 200) {
+      setPredError("Goal weight must be between 20 kg and 200 kg.");
+      return;
+    }
+    setPredError("");
     setPredicting(true);
     try {
       const res = await userApi.post("/progress/predict", predForm);
       setPredResult(res.data.data);
     } catch (err) {
       console.error(err);
+      setPredError(err.response?.data?.message || "Unable to calculate prediction. Please try again.");
     } finally {
       setPredicting(false);
     }
+  };
+
+  const logWeightValue = logForm.weight;
+  const logWeightError = logWeightValue !== "" && logWeightValue != null
+    ? Number(logWeightValue) < 20 || Number(logWeightValue) > 200
+      ? "Weight must be between 20 and 200 kg."
+      : ""
+    : "";
+
+  const predFieldError = (key) => {
+    const v = predForm[key];
+    if (v === "" || v == null) return "";
+    const n = Number(v);
+    return n < 20 || n > 200
+      ? `${key === "current_weight" ? "Current weight" : "Goal weight"} must be between 20 and 200 kg.`
+      : "";
   };
 
   const chartOptions = {
@@ -367,32 +414,23 @@ export default function ProgressPage() {
           <div className="grid grid-cols-2 gap-3 mb-3">
             <div>
               <label className="block text-xs text-slate-500 mb-1">Weight (kg)</label>
-              <input type="number" value={logForm.weight}
+              <input type="number" min="20" max="200" step="0.1" value={logForm.weight}
                 onChange={(e) => handleWeightChange(e.target.value)}
                 placeholder="e.g. 72.5"
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-slate-900 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500" />
+                aria-invalid={!!logWeightError}
+                className={`w-full bg-slate-50 border rounded-xl px-3 py-2.5 text-slate-900 text-sm focus:outline-none focus:ring-2 ${logWeightError ? "border-red-400 focus:ring-red-300" : "border-slate-200 focus:ring-orange-500"}`} />
+              {logWeightError
+                ? <p className="mt-1 text-xs text-red-500">{logWeightError}</p>
+                : <p className="mt-1 text-[10px] text-slate-400">Numbers only · 20–200 kg</p>}
             </div>
             <div>
               <label className="block text-xs text-slate-500 mb-1">BMI (auto)</label>
               <input type="number" value={logForm.bmi} readOnly
                 className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-slate-500 text-sm cursor-not-allowed" />
             </div>
-            <div>
-              <label className="block text-xs text-slate-500 mb-1" htmlFor="progress-body-fat">Body fat (%) <span className="text-slate-400">optional</span></label>
-              <input id="progress-body-fat" type="number" min="0" max="100" step="0.1" value={logForm.body_fat}
-                onChange={(e) => setLogForm({ ...logForm, body_fat: e.target.value })}
-                placeholder="e.g. 22.5"
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-slate-900 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500" />
-            </div>
-            <div>
-              <label className="block text-xs text-slate-500 mb-1" htmlFor="progress-waist">Waist (cm) <span className="text-slate-400">optional</span></label>
-              <input id="progress-waist" type="number" min="0" step="0.1" value={logForm.waist}
-                onChange={(e) => setLogForm({ ...logForm, waist: e.target.value })}
-                placeholder="e.g. 82"
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-slate-900 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500" />
-            </div>
           </div>
           {logMsg && <p role="status" className="text-green-600 dark:text-green-400 text-sm mb-2">{logMsg}</p>}
+          {logError && <p role="alert" className="text-red-500 text-sm mb-2">{logError}</p>}
           <button onClick={handleLogProgress} disabled={logging || !logForm.weight}
             className="w-full bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white font-bold py-3 rounded-xl transition text-sm">
             {logging ? "Logging..." : "Log Progress"}
@@ -408,16 +446,24 @@ export default function ProgressPage() {
             {[
               { label: "Current Weight (kg)", key: "current_weight" },
               { label: "Goal Weight (kg)", key: "goal_weight" },
-              { label: "Expected Weekly Loss/Gain (kg)", key: "weekly_loss" },
-            ].map((f) => (
-              <div key={f.key}>
-                <label className="block text-xs text-slate-500 mb-1">{f.label}</label>
-                <input type="number" value={predForm[f.key]}
-                  onChange={(e) => setPredForm({ ...predForm, [f.key]: e.target.value })}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-slate-900 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500" />
-              </div>
-            ))}
+            ].map((f) => {
+              const fieldError = predFieldError(f.key);
+              return (
+                <div key={f.key}>
+                  <label className="block text-xs text-slate-500 mb-1">{f.label}</label>
+                  <input type="number" min="20" max="200" step="0.1" value={predForm[f.key]}
+                    onChange={(e) => setPredForm({ ...predForm, [f.key]: weightInput(e.target.value, predForm[f.key]) })}
+                    aria-invalid={!!fieldError}
+                    className={`w-full bg-slate-50 border rounded-xl px-3 py-2.5 text-slate-900 text-sm focus:outline-none focus:ring-2 ${fieldError ? "border-red-400 focus:ring-red-300" : "border-slate-200 focus:ring-orange-500"}`} />
+                  {fieldError
+                    ? <p className="mt-1 text-xs text-red-500">{fieldError}</p>
+                    : <p className="mt-1 text-[10px] text-slate-400">Numbers only · 20–200 kg</p>}
+                </div>
+              );
+            })}
           </div>
+
+          {predError && <p role="alert" className="text-red-500 text-sm mb-2">{predError}</p>}
 
           <button onClick={handlePredict} disabled={predicting}
             className="w-full bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white font-bold py-3 rounded-xl transition text-sm mb-4">

@@ -18,6 +18,17 @@ const getProgress = async (req, res) => {
 const logProgress = async (req, res) => {
   try {
     const { weight, bmi, body_fat, waist, chest, hips, left_arm } = req.body;
+
+    if (
+      weight != null &&
+      (!Number.isFinite(Number(weight)) || Number(weight) < 20 || Number(weight) > 200)
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Weight must be between 20 kg and 200 kg.",
+      });
+    }
+
     const result = await pool.query(`
       INSERT INTO progress_logs (user_id, weight, bmi, body_fat, waist, chest, hips, left_arm, log_date)
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,(NOW() AT TIME ZONE 'Asia/Manila')::date) RETURNING *
@@ -36,10 +47,21 @@ const calculatePrediction = async (req, res) => {
 
     const cw = parseFloat(current_weight);
     const gw = parseFloat(goal_weight);
-    const wl = parseFloat(weekly_loss);
+    const wl = weekly_loss === undefined || weekly_loss === null || weekly_loss === ""
+      ? 0.5
+      : parseFloat(weekly_loss);
 
-    if (!cw || !gw || !wl || wl <= 0)
-      return res.status(400).json({ success: false, message: "Invalid values." });
+    if (!cw || !gw || cw <= 0 || gw <= 0)
+      return res.status(400).json({ success: false, message: "Current and goal weight must be greater than 0." });
+
+    if (cw < 20 || cw > 200 || gw < 20 || gw > 200)
+      return res.status(400).json({
+        success: false,
+        message: "Current and goal weight must be between 20 kg and 200 kg.",
+      });
+
+    if (!Number.isFinite(wl) || wl <= 0)
+      return res.status(400).json({ success: false, message: "Invalid weekly loss/gain value." });
 
     const weightDiff = Math.abs(cw - gw);
     const weeksNeeded = Math.ceil(weightDiff / wl);

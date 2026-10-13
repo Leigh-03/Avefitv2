@@ -11,6 +11,16 @@ const {
   normalizeEmail,
 } = require("../utils/security");
 
+const TRAINER_EMAIL_DOMAIN = "@avefit.com";
+const isTrainerEmail = (email) => normalizeEmail(email).endsWith(TRAINER_EMAIL_DOMAIN);
+
+const GOAL_SPECIALTIES = [
+  "Weight Loss",
+  "Muscle Gain",
+  "Maintain Weight",
+  "General Fitness",
+];
+
 // =========================================================
 // Allowed trainer specializations
 // =========================================================
@@ -94,7 +104,8 @@ const getTrainers = async (req, res) => {
         updated_at,
         goal_specialty,
         photo_url,
-        bio
+        bio,
+        (password IS NOT NULL AND password <> '') AS has_portal_access
       FROM trainers
       ORDER BY created_at DESC
     `);
@@ -140,7 +151,8 @@ const getTrainerById = async (req, res) => {
         updated_at,
         goal_specialty,
         photo_url,
-        bio
+        bio,
+        (password IS NOT NULL AND password <> '') AS has_portal_access
       FROM trainers
       WHERE trainer_id = $1
       `,
@@ -206,6 +218,13 @@ const createTrainer = async (req, res) => {
       });
     }
 
+    if (!isTrainerEmail(email)) {
+      return res.status(400).json({
+        success: false,
+        message: `Trainer email must use the ${TRAINER_EMAIL_DOMAIN} domain.`,
+      });
+    }
+
     if (typeof phone !== "string" || !/^09\d{9}$/.test(phone)) {
       return res.status(400).json({
         success: false,
@@ -213,11 +232,39 @@ const createTrainer = async (req, res) => {
       });
     }
 
-    if (password && !validatePassword(password)) {
+    if (!password) {
+      return res.status(400).json({
+        success: false,
+        message: "Coach portal password is required.",
+      });
+    }
+
+    if (!validatePassword(password)) {
       return res.status(400).json({
         success: false,
         message:
           "Use 8–12 characters with a letter, a number, and a symbol. Avoid common passwords.",
+      });
+    }
+
+    const bioText = String(bio || "").trim();
+    if (!bioText) {
+      return res.status(400).json({
+        success: false,
+        message: "Coach bio / profile is required.",
+      });
+    }
+    if (bioText.length > 500) {
+      return res.status(400).json({
+        success: false,
+        message: "Coach bio must be 500 characters or fewer.",
+      });
+    }
+
+    if (!GOAL_SPECIALTIES.includes(goal_specialty)) {
+      return res.status(400).json({
+        success: false,
+        message: "Choose a valid goal match for 'Recommended For'.",
       });
     }
 
@@ -235,9 +282,14 @@ const createTrainer = async (req, res) => {
     const cleanSpecializations =
       sanitizeSpecializations(specializations);
 
-    const hashed = password
-      ? await bcrypt.hash(password, 12)
-      : null;
+    if (cleanSpecializations.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Select at least one specialization for this coach.",
+      });
+    }
+
+    const hashed = await bcrypt.hash(password, 12);
 
     const result = await pool.query(
       `
@@ -275,7 +327,7 @@ const createTrainer = async (req, res) => {
         hashed,
         photo_url || null,
         goal_specialty || null,
-        bio || null,
+        bioText || null,
       ]
     );
 
@@ -341,6 +393,13 @@ const updateTrainer = async (req, res) => {
       });
     }
 
+    if (!isTrainerEmail(email)) {
+      return res.status(400).json({
+        success: false,
+        message: `Trainer email must use the ${TRAINER_EMAIL_DOMAIN} domain.`,
+      });
+    }
+
     if (typeof phone !== "string" || !/^09\d{9}$/.test(phone)) {
       return res.status(400).json({
         success: false,
@@ -367,6 +426,27 @@ const updateTrainer = async (req, res) => {
       });
     }
 
+    const bioText = String(bio || "").trim();
+    if (!bioText) {
+      return res.status(400).json({
+        success: false,
+        message: "Coach bio / profile is required.",
+      });
+    }
+    if (bioText.length > 500) {
+      return res.status(400).json({
+        success: false,
+        message: "Coach bio must be 500 characters or fewer.",
+      });
+    }
+
+    if (!GOAL_SPECIALTIES.includes(goal_specialty)) {
+      return res.status(400).json({
+        success: false,
+        message: "Choose a valid goal match for 'Recommended For'.",
+      });
+    }
+
     if (photo_url) {
       const imageCheck = validateImageDataUrl(photo_url);
 
@@ -380,6 +460,13 @@ const updateTrainer = async (req, res) => {
 
     const cleanSpecializations =
       sanitizeSpecializations(specializations);
+
+    if (cleanSpecializations.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Select at least one specialization for this coach.",
+      });
+    }
 
     if (password) {
       const hashed = await bcrypt.hash(password, 12);
@@ -410,7 +497,7 @@ const updateTrainer = async (req, res) => {
           hashed,
           photo_url || null,
           goal_specialty || null,
-          bio || null,
+          bioText || null,
           id,
         ]
       );
@@ -439,7 +526,7 @@ const updateTrainer = async (req, res) => {
           status,
           photo_url || null,
           goal_specialty || null,
-          bio || null,
+          bioText || null,
           id,
         ]
       );
@@ -1075,16 +1162,15 @@ const createMyWorkoutPlan = async (req, res) => {
     String(session.sets ?? "").trim() === "" ||
     !Number.isInteger(Number(session.sets)) ||
     Number(session.sets) < 1 ||
+    Number(session.sets) > 6 ||
     String(session.reps ?? "").trim() === "" ||
     !Number.isInteger(Number(session.reps)) ||
-    Number(session.reps) < 1 ||
-    String(session.duration_minutes ?? "").trim() === "" ||
-    !Number.isInteger(Number(session.duration_minutes)) ||
-    Number(session.duration_minutes) < 1
+    Number(session.reps) < 3 ||
+    Number(session.reps) > 16
   )) {
     return res.status(400).json({
       success: false,
-      message: "Every exercise must have an exercise, sets, reps, and duration greater than 0.",
+      message: "Every exercise must have an exercise, sets from 1 to 6, and reps from 3 to 16.",
     });
   }
 
@@ -1159,14 +1245,13 @@ const createMyWorkoutPlan = async (req, res) => {
         `
         INSERT INTO workout_sessions
           (workout_plan_id, exercise_id, sets, reps, duration_minutes, session_date)
-        VALUES ($1, $2, $3, $4, $5, $6)
+        VALUES ($1, $2, $3, $4, NULL, $5)
         `,
         [
           planId,
           Number(session.exercise_id),
           Number(session.sets),
           Number(session.reps),
-          Number(session.duration_minutes),
           sessionDate,
         ]
       );
@@ -1468,15 +1553,92 @@ const assignSessionAsTrainer = async (req, res) => {
       });
     }
 
-    const owns = await memberBelongsToTrainer(
-      user_id,
-      trainerId
+    const setsValue = Number(sets);
+    const repsValue = Number(reps);
+
+    if (!Number.isInteger(setsValue) || setsValue < 1 || setsValue > 6) {
+      return res.status(400).json({
+        success: false,
+        message: "Sets must be a whole number from 1 to 6.",
+      });
+    }
+
+    if (!Number.isInteger(repsValue) || repsValue < 3 || repsValue > 16) {
+      return res.status(400).json({
+        success: false,
+        message: "Reps must be a whole number from 3 to 16.",
+      });
+    }
+
+    if (
+      typeof session_date !== "string" ||
+      !/^\d{4}-\d{2}-\d{2}$/.test(session_date)
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Please provide a valid workout date.",
+      });
+    }
+
+    const parsedSessionDate = new Date(`${session_date}T00:00:00.000Z`);
+    if (
+      Number.isNaN(parsedSessionDate.getTime()) ||
+      parsedSessionDate.toISOString().slice(0, 10) !== session_date
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Please provide a valid workout date.",
+      });
+    }
+
+    const currentDate = await pool.query(
+      "SELECT TO_CHAR(CURRENT_DATE, 'YYYY-MM-DD') AS today"
+    );
+    if (session_date < currentDate.rows[0].today) {
+      return res.status(400).json({
+        success: false,
+        message: "Workout date can't be in the past.",
+      });
+    }
+
+    const memberAvailability = await pool.query(
+      `
+      SELECT preferred_days
+      FROM users
+      WHERE user_id = $1
+        AND trainer_id = $2
+        AND COALESCE(account_status, 'Pending') = 'Active'
+      `,
+      [user_id, trainerId]
     );
 
-    if (!owns) {
+    if (!memberAvailability.rowCount) {
       return res.status(403).json({
         success: false,
         message: "This member isn't on your roster.",
+      });
+    }
+
+    const preferredDays = memberAvailability.rows[0]?.preferred_days || [];
+    const weekday = [
+      "Sunday",
+      "Monday",
+      "Tuesday",
+      "Wednesday",
+      "Thursday",
+      "Friday",
+      "Saturday",
+    ][parsedSessionDate.getUTCDay()];
+
+    if (
+      !Array.isArray(preferredDays) ||
+      !preferredDays.some(
+        (day) => String(day).trim().toLowerCase() === weekday.toLowerCase()
+      )
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "The selected date is not part of this client's availability.",
       });
     }
 
@@ -1547,8 +1709,8 @@ const assignSessionAsTrainer = async (req, res) => {
       [
         planId,
         exercise_id,
-        sets || null,
-        reps || null,
+        setsValue,
+        repsValue,
         duration_minutes || null,
         session_date,
       ]
