@@ -3,6 +3,7 @@ import { UserCheck, Plus, Search, Edit2, XCircle, Users, UserCircle, X, Camera, 
 import api from "../services/api";
 import { fileToCompressedDataUrl } from "../utils/imageUpload";
 import TrainerAvailabilityManager from "../components/trainers/TrainerAvailabilityManager";
+import ConfirmDialog from "../components/ui/ConfirmDialog";
 
 const SPECIALIZATION_OPTIONS = [
   "High-Intensity Interval Training (HIIT)",
@@ -625,6 +626,9 @@ export default function Trainers() {
   const [rosterTrainer, setRosterTrainer] = useState(null);
   const [profileTrainer, setProfileTrainer] = useState(null);
   const [availabilityTrainer, setAvailabilityTrainer] = useState(null);
+  const [trainerAction, setTrainerAction] = useState(null);
+  const [trainerActionLoading, setTrainerActionLoading] = useState(false);
+  const [trainerActionError, setTrainerActionError] = useState("");
 
   const fetchTrainers = () => {
     setLoading(true);
@@ -646,18 +650,35 @@ export default function Trainers() {
   };
 
   const handleReject = async (id) => {
-    if (!confirm("Reject this trainer account?")) return;
-    await api.put(`/trainers/${id}/reject`);
-    fetchTrainers();
+    const trainer = trainers.find((row) => Number(row.trainer_id) === Number(id));
+    if (trainer) {
+      setTrainerAction({ kind: "reject", trainer });
+      setTrainerActionError("");
+    }
   };
 
   const handleRemove = async (trainer) => {
-    if (!window.confirm(`Permanently remove ${trainer.full_name}? Existing member and workout assignments will be unassigned.`)) return;
+    setTrainerAction({ kind: "remove", trainer });
+    setTrainerActionError("");
+  };
+
+  const confirmTrainerAction = async () => {
+    if (!trainerAction) return;
+    setTrainerActionLoading(true);
+    setTrainerActionError("");
     try {
-      await api.delete(`/trainers/${trainer.trainer_id}`);
+      if (trainerAction.kind === "remove") {
+        await api.delete(`/trainers/${trainerAction.trainer.trainer_id}`);
+      } else {
+        await api.put(`/trainers/${trainerAction.trainer.trainer_id}/reject`);
+      }
+      setTrainerAction(null);
       fetchTrainers();
     } catch (err) {
-      window.alert(err.response?.data?.message || "Failed to remove trainer.");
+      const action = trainerAction.kind === "remove" ? "remove this trainer" : "reject this trainer";
+      setTrainerActionError(err.response?.data?.message || `Failed to ${action}. Please try again.`);
+    } finally {
+      setTrainerActionLoading(false);
     }
   };
 
@@ -710,6 +731,27 @@ export default function Trainers() {
           trainerId={availabilityTrainer.trainer_id}
           trainerName={availabilityTrainer.full_name}
           onClose={() => setAvailabilityTrainer(null)}
+        />
+      )}
+
+      {trainerAction && (
+        <ConfirmDialog
+          title={trainerAction.kind === "remove"
+            ? `Permanently remove ${trainerAction.trainer.full_name}?`
+            : `Reject ${trainerAction.trainer.full_name}?`}
+          description={trainerAction.kind === "remove"
+            ? "This permanently deletes the trainer account. Existing member and workout assignments will be unassigned."
+            : "This will mark the trainer account as rejected so they cannot access the coach portal."}
+          confirmLabel={trainerAction.kind === "remove" ? "Remove trainer" : "Reject trainer"}
+          isLoading={trainerActionLoading}
+          error={trainerActionError}
+          onCancel={() => {
+            if (!trainerActionLoading) {
+              setTrainerAction(null);
+              setTrainerActionError("");
+            }
+          }}
+          onConfirm={confirmTrainerAction}
         />
       )}
 

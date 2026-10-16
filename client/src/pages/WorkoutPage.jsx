@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useState } from "react";
-import { ArrowRight, CalendarDays, CheckCircle, Dumbbell, Moon, Play, RotateCcw, Target, Trash2 } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { ArrowLeft, ArrowRight, CalendarDays, CheckCircle, Dumbbell, Moon, Play, RotateCcw, Target, Trash2 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useUserAuth } from "../context/UserAuthContext";
 import userApi from "../userApi";
 import { formatPhilippinesDate, philippinesDateKey, philippinesDateString, philippinesMondayString } from "../utils/philippinesDate";
+import { getWorkoutDayGroups } from "../utils/workoutSessions";
 
 const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 
@@ -21,21 +22,38 @@ const formatWorkoutTime = (date) =>
     timeZone: "Asia/Manila",
   }).format(new Date(date));
 
-const getPhilippinesWeekday = (date = new Date()) => {
-  const dateKey = philippinesDateString(date);
+const addDays = (dateKey, days) => {
   const [year, month, day] = dateKey.split("-").map(Number);
-  const weekday = new Date(Date.UTC(year, month - 1, day)).getUTCDay();
-  return DAYS[(weekday + 6) % 7];
+  const date = new Date(Date.UTC(year, month - 1, day + days));
+  return [
+    date.getUTCFullYear(),
+    String(date.getUTCMonth() + 1).padStart(2, "0"),
+    String(date.getUTCDate()).padStart(2, "0"),
+  ].join("-");
+};
+
+const getWeekday = (dateKey) => {
+  const [year, month, day] = dateKey.split("-").map(Number);
+  return DAYS[(new Date(Date.UTC(year, month - 1, day)).getUTCDay() + 6) % 7];
+};
+
+const isSessionScheduledForDate = (session, date) => {
+  const scheduledDate = philippinesDateKey(session.session_date);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(scheduledDate)) return scheduledDate === date;
+  const scheduledWeekday = String(session.day_of_week || session.session_date || "").trim().toLowerCase();
+  return scheduledWeekday === getWeekday(date).toLowerCase();
 };
 
 export default function WorkoutPage() {
   const { user } = useUserAuth();
+  const initializedSchedule = useRef(false);
   const [sessions, setSessions] = useState([]);
   const [workoutDays, setWorkoutDays] = useState([]); // days the user picked as their availability
   const [fitnessGoal, setFitnessGoal] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [activeDay, setActiveDay] = useState(() => getPhilippinesWeekday());
+  const [weekStart, setWeekStart] = useState(() => philippinesMondayString());
+  const [activeDay, setActiveDay] = useState(() => philippinesDateString());
   const [startingSessionId, setStartingSessionId] = useState(null);
 
   const fetchData = useCallback(async () => {
@@ -53,15 +71,17 @@ export default function WorkoutPage() {
       setWorkoutDays(days);
       setFitnessGoal(profile.fitness_goal || "");
       const today = philippinesDateString();
-      const nextScheduledDate = [...new Set(
-        loadedSessions
-          .map((session) => philippinesDateKey(session.session_date))
-          .filter((date) => typeof date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(date) && date >= today)
-      )].sort()[0];
-      if (nextScheduledDate) {
-        setActiveDay(nextScheduledDate);
-      } else if (days.length > 0) {
-        setActiveDay((currentDay) => days.includes(currentDay) ? currentDay : days[0]);
+      if (!initializedSchedule.current) {
+        const nextScheduledDate = [...new Set(
+          loadedSessions
+            .map((session) => philippinesDateKey(session.session_date))
+            .filter((date) => /^\d{4}-\d{2}-\d{2}$/.test(date) && date >= today)
+        )].sort()[0];
+        const initialDate = nextScheduledDate || today;
+        const initialWeekStart = philippinesMondayString(new Date(`${initialDate}T12:00:00+08:00`));
+        setWeekStart(initialWeekStart);
+        setActiveDay(initialDate);
+        initializedSchedule.current = true;
       }
     } catch (err) {
       console.error(err);
@@ -74,8 +94,10 @@ export default function WorkoutPage() {
   useEffect(() => { fetchData(); }, [fetchData]);
 
   const isWorkoutDay = (day) => {
-    if (/^\d{4}-\d{2}-\d{2}$/.test(day)) return sessions.some((session) => philippinesDateKey(session.session_date) === day);
-    return workoutDays.length === 0 || workoutDays.includes(day);
+    const weekday = getWeekday(day);
+    return sessions.some((session) => (
+      philippinesDateKey(session.session_date) === day || session.day_of_week === weekday
+    )) || workoutDays.length === 0 || workoutDays.includes(weekday);
   };
 
   const handleComplete = async (id) => {
@@ -126,17 +148,18 @@ export default function WorkoutPage() {
     }
   };
 
-  const daySessions = sessions.filter((s) => philippinesDateKey(s.session_date) === activeDay || s.day_of_week === activeDay);
-  const completedCount = sessions.filter((s) => s.completed).length;
+  const daySessions = sessions.filter((session) => (
+    philippinesDateKey(session.session_date) === activeDay ||
+    (!/^\d{4}-\d{2}-\d{2}$/.test(philippinesDateKey(session.session_date)) && session.day_of_week === getWeekday(activeDay))
+  ));
+  const workoutDayGroups = getWorkoutDayGroups(sessions);
+  const completedWorkoutDays = workoutDayGroups.filter((group) => group.isComplete);
+  const completedCount = completedWorkoutDays.length;
   const today = philippinesDateString();
   const weekStartDate = philippinesMondayString();
-  const completedThisWeek = sessions.filter((session) => {
-    if (!session.completed) return false;
-    const value = session.completed_at || session.session_date;
-    if (!value) return false;
-    const date = philippinesDateKey(value);
-    return date >= weekStartDate && date <= today;
-  }).length;
+  const completedThisWeek = completedWorkoutDays.filter(
+    (group) => group.completionDate >= weekStartDate && group.completionDate <= today
+  ).length;
   const weeklyGoal = workoutDays.length;
   const weeklyProgress = weeklyGoal ? Math.min(100, Math.round((completedThisWeek / weeklyGoal) * 100)) : 0;
   const nextSession = sessions
@@ -145,13 +168,10 @@ export default function WorkoutPage() {
       return !session.completed && date && date >= today;
     })
     .sort((a, b) => philippinesDateKey(a.session_date).localeCompare(philippinesDateKey(b.session_date)))[0];
-  const isScheduledDate = /^\d{4}-\d{2}-\d{2}$/.test(activeDay);
-  const activeDayLabel = isScheduledDate ? formatWorkoutDate(activeDay) : activeDay;
-  const scheduledDates = [...new Set(
-    sessions
-      .map((session) => philippinesDateKey(session.session_date))
-      .filter((date) => typeof date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(date))
-  )].sort();
+  const weekDates = DAYS.map((_, index) => addDays(weekStart, index));
+  const activeDayLabel = formatWorkoutDate(activeDay);
+  const weekEnd = weekDates[6];
+  const weekLabel = `${formatPhilippinesDate(weekStart, { month: "short", day: "numeric" })} – ${formatPhilippinesDate(weekEnd, { month: "short", day: "numeric", year: "numeric" })}`;
 
   return (
     <div className="min-h-screen bg-[#fffaf5] dark:bg-[#080808] text-slate-900 dark:text-white">
@@ -181,7 +201,7 @@ export default function WorkoutPage() {
               <div className="mb-2 flex items-center justify-between gap-3">
                 <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">This week</span>
                 <span className="text-sm font-bold text-orange-600 dark:text-orange-400">
-                  {weeklyGoal ? `${completedThisWeek}/${weeklyGoal} sessions` : `${completedCount} completed all time`}
+                  {weeklyGoal ? `${completedThisWeek}/${weeklyGoal} workout days` : `${completedCount} workout days completed`}
                 </span>
               </div>
               <div
@@ -216,34 +236,69 @@ export default function WorkoutPage() {
 
       {/* Day Selector */}
       <div className="overflow-x-auto px-5 py-4 sm:px-8">
-        <div className="mx-auto flex w-max gap-2 lg:mx-0">
-          {[...DAYS, ...scheduledDates].map((day) => {
-            const hasWorkout = sessions.some((s) => philippinesDateKey(s.session_date) === day || s.day_of_week === day);
-            const restDay = !isWorkoutDay(day);
-            const isDate = /^\d{4}-\d{2}-\d{2}$/.test(day);
-            const label = isDate ? formatWorkoutDate(day) : day.slice(0, 3);
-            return (
-              <button
-                key={day}
-                onClick={() => setActiveDay(day)}
-                aria-pressed={activeDay === day}
-                className={`flex flex-col items-center px-4 py-3 rounded-2xl text-sm font-medium transition min-w-[60px] ${
-                  activeDay === day
-                    ? "bg-orange-500 text-white"
-                    : restDay
-                    ? "bg-slate-50 text-slate-600"
-                    : "bg-white text-slate-500 hover:bg-slate-100"
-                }`}
-              >
-                <span className={isDate ? "whitespace-nowrap text-xs" : ""}>{label}</span>
-                {restDay ? (
-                  <Moon size={10} className={`mt-1 ${activeDay === day ? "text-orange-400" : "text-slate-600"}`} />
-                ) : hasWorkout ? (
-                  <div className={`w-1.5 h-1.5 rounded-full mt-1 ${activeDay === day ? "bg-white" : "bg-orange-500"}`} />
-                ) : null}
-              </button>
-            );
-          })}
+        <div className="mx-auto max-w-5xl">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <button
+              type="button"
+              onClick={() => {
+                const previousWeekStart = addDays(weekStart, -7);
+                setWeekStart(previousWeekStart);
+                setActiveDay(addDays(previousWeekStart, Math.max(0, weekDates.indexOf(activeDay))));
+              }}
+              aria-label="Previous week"
+              className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-slate-200 bg-white text-slate-600 transition hover:border-orange-300 hover:text-orange-600 dark:border-white/10 dark:bg-[#111] dark:text-slate-300"
+            >
+              <ArrowLeft size={17} />
+            </button>
+            <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">{weekLabel}</p>
+            <button
+              type="button"
+              onClick={() => {
+                const nextWeekStart = addDays(weekStart, 7);
+                setWeekStart(nextWeekStart);
+                setActiveDay(addDays(nextWeekStart, Math.max(0, weekDates.indexOf(activeDay))));
+              }}
+              aria-label="Next week"
+              className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-slate-200 bg-white text-slate-600 transition hover:border-orange-300 hover:text-orange-600 dark:border-white/10 dark:bg-[#111] dark:text-slate-300"
+            >
+              <ArrowRight size={17} />
+            </button>
+          </div>
+          <div className="flex w-max gap-2 lg:w-full">
+            {weekDates.map((day) => {
+              const hasWorkout = sessions.some((session) => (
+                philippinesDateKey(session.session_date) === day ||
+                (!/^\d{4}-\d{2}-\d{2}$/.test(philippinesDateKey(session.session_date)) && session.day_of_week === getWeekday(day))
+              ));
+              const restDay = !isWorkoutDay(day);
+              const label = getWeekday(day).slice(0, 3);
+              return (
+                <button
+                  key={day}
+                  onClick={() => setActiveDay(day)}
+                  aria-pressed={activeDay === day}
+                  aria-label={`${getWeekday(day)}, ${formatWorkoutDate(day)} workout plan`}
+                  className={`flex min-w-[62px] flex-col items-center rounded-2xl px-3 py-3 text-sm font-medium transition sm:flex-1 ${
+                    activeDay === day
+                      ? "bg-orange-500 text-white"
+                      : restDay
+                        ? "bg-slate-50 text-slate-600"
+                        : "bg-white text-slate-500 hover:bg-slate-100"
+                  }`}
+                >
+                  <span>{label}</span>
+                  <span className={`mt-0.5 text-[10px] ${activeDay === day ? "text-orange-100" : "text-slate-400"}`}>
+                    {formatPhilippinesDate(day, { month: "numeric", day: "numeric" })}
+                  </span>
+                  {restDay ? (
+                    <Moon size={10} className={`mt-1 ${activeDay === day ? "text-orange-400" : "text-slate-600"}`} />
+                  ) : hasWorkout ? (
+                    <div className={`mt-1 h-1.5 w-1.5 rounded-full ${activeDay === day ? "bg-white" : "bg-orange-500"}`} />
+                  ) : null}
+                </button>
+              );
+            })}
+          </div>
         </div>
       </div>
 
@@ -254,7 +309,7 @@ export default function WorkoutPage() {
             <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Training plan</p>
             <h2 className="mt-0.5 font-bold text-slate-900 dark:text-white">{activeDayLabel}&apos;s workouts</h2>
           </div>
-          {!isScheduledDate && isWorkoutDay(activeDay) && daySessions.length > 0 && (
+          {!daySessions.some((session) => /^\d{4}-\d{2}-\d{2}$/.test(philippinesDateKey(session.session_date))) && isWorkoutDay(activeDay) && daySessions.length > 0 && (
             <button onClick={handleReset} className="flex items-center gap-1 text-xs text-slate-500 hover:text-red-400 transition">
               <RotateCcw size={14} /> Reset
             </button>
@@ -295,6 +350,7 @@ export default function WorkoutPage() {
                 </div>
                 <div className="flex items-center gap-2">
                   {!session.completed && (
+                    isSessionScheduledForDate(session, today) ? (
                     session.started_at ? (
                       <div className="flex flex-col items-end gap-1">
                         <span className="text-[11px] font-medium text-slate-500">
@@ -314,6 +370,11 @@ export default function WorkoutPage() {
                         <Play size={16} fill="currentColor" />
                         {startingSessionId === session.session_id ? "Starting..." : "Start workout"}
                       </button>
+                    )
+                    ) : (
+                      <span className="text-right text-xs font-medium text-slate-500">
+                        Available {formatWorkoutDate(session.session_date)}
+                      </span>
                     )
                   )}
                   <button type="button" onClick={() => handleDelete(session.session_id)}

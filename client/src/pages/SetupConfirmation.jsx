@@ -5,6 +5,13 @@ import { CheckCircle2, TrendingUp, User } from "lucide-react";
 import { useUserAuth } from "../context/UserAuthContext";
 import userApi from "../userApi";
 
+const preferredWorkoutTimeLabels = {
+  Morning: "Morning (6:00 AM – 12:00 PM)",
+  Afternoon: "Afternoon (12:00 PM – 5:00 PM)",
+  Evening: "Evening (5:00 PM – 10:00 PM)",
+  Flexible: "Flexible (6:00 AM – 10:00 PM)",
+};
+
 function Row({ label, value }) {
   return (
     <div className="flex items-center justify-between py-2 border-b border-slate-200 last:border-0">
@@ -38,24 +45,33 @@ export default function SetupConfirmation() {
     setTrainer(coach);
 
     userApi.get("/profile")
-      .then((res) => {
+      .then(async (res) => {
         const p = res.data.data;
         setProfile(p);
 
-        return userApi.post("/progress/auto-predict", {
-          goal: goal.goal,
-          current_weight: p.weight,
-          target_weight: goal.targetWeight,
-          height: p.height,
-          days_per_week: avail.daysPerWeek,
-          intensity: health.intensity,
-          experience: health.experience,
-        });
+        try {
+          const predictionResponse = await userApi.post("/progress/auto-predict", {
+            goal: goal.goal,
+            current_weight: p.weight,
+            target_weight: goal.targetWeight,
+            height: p.height,
+            days_per_week: avail.daysPerWeek,
+            intensity: health.intensity,
+            experience: health.experience,
+          });
+          setPrediction(predictionResponse?.data?.data || null);
+        } catch (err) {
+          console.error("Setup timeline prediction failed:", err);
+          setError("Your setup loaded, but the predicted timeline is unavailable.");
+        }
       })
-      .then((res) => setPrediction(res?.data?.data || null))
       .catch((err) => {
-        console.error(err);
-        setError("Some of your info couldn't load — you can still continue.");
+        console.error("Setup profile load failed:", err);
+        setProfile(null);
+        setError(
+          err.response?.data?.message ||
+          "Your profile could not be loaded. Please refresh before saving your setup."
+        );
       })
       .finally(() => setLoading(false));
   }, []);
@@ -71,6 +87,7 @@ export default function SetupConfirmation() {
         workout_days_per_week: availability.daysPerWeek ? parseInt(availability.daysPerWeek) : null,
         workout_duration: availability.duration ? parseInt(String(availability.duration), 10) : null,
         preferred_days: availability.days || [],
+        preferred_workout_time: availability.preferredWorkoutTime || null,
         intensity: healthData.intensity || null,
         injuries: healthData.injuries || [],
         health_conditions: healthData.healthConditions || [],
@@ -86,8 +103,11 @@ export default function SetupConfirmation() {
       updateUser({ setup_completed: true });
       navigate("/user/workout");
     } catch (err) {
-      console.error(err);
-      setError("Something went wrong saving your setup. Please try again.");
+      console.error("Setup save failed:", err);
+      setError(
+        err.response?.data?.message ||
+        "Something went wrong saving your setup. Please try again."
+      );
     } finally {
       setSaving(false);
     }
@@ -140,6 +160,10 @@ export default function SetupConfirmation() {
           <Row label="Days Per Week" value={availability.daysPerWeek || "—"} />
           <Row label="Session Duration" value={availability.duration || "—"} />
           <Row label="Workout Days" value={(availability.days || []).join(", ") || "—"} />
+          <Row
+            label="Preferred Workout Time"
+            value={preferredWorkoutTimeLabels[availability.preferredWorkoutTime] || "—"}
+          />
         </div>
 
         {/* Coach */}
@@ -176,7 +200,7 @@ export default function SetupConfirmation() {
 
     <button
       onClick={handleConfirm}
-      disabled={saving || loading}
+      disabled={saving || loading || !profile}
       className="w-full bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white font-bold py-3 rounded-xl transition flex items-center justify-center gap-2"
     >
       <CheckCircle2 size={18} />

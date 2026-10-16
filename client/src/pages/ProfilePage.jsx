@@ -2,6 +2,7 @@ import { useEffect, useState, useRef } from "react";
 import { Activity, Save, LogOut, ChevronRight, Camera, CircleUserRound, Dumbbell } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useUserAuth } from "../context/UserAuthContext";
+import { PasswordField } from "../components/ui/Form";
 import userApi from "../userApi";
 import { fileToCompressedDataUrl } from "../utils/imageUpload";
 
@@ -21,6 +22,11 @@ export default function ProfilePage() {
   const [msg, setMsg] = useState("");
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
+  const [passwordForm, setPasswordForm] = useState({ code: "", password: "", confirmPassword: "" });
+  const [passwordCodeSent, setPasswordCodeSent] = useState(false);
+  const [passwordLoading, setPasswordLoading] = useState(false);
+  const [passwordNotice, setPasswordNotice] = useState("");
+  const [passwordError, setPasswordError] = useState("");
 
   useEffect(() => {
     userApi.get("/profile")
@@ -37,6 +43,7 @@ export default function ProfilePage() {
           weight: d.weight || "",
           fitness_goal: d.fitness_goal || "",
           activity_level: d.activity_level || "",
+          preferred_workout_time: d.preferred_workout_time || "",
         });
         setPhoto(d.profile_image || null);
         if (d.height && d.weight) {
@@ -95,6 +102,59 @@ export default function ProfilePage() {
     } finally {
       setSaving(false);
       setTimeout(() => setMsg(""), 3000);
+    }
+  };
+
+  const handleRequestPasswordCode = async () => {
+    setPasswordLoading(true);
+    setPasswordError("");
+    setPasswordNotice("");
+    try {
+      const res = await userApi.post("/password/change-code");
+      setPasswordCodeSent(true);
+      setPasswordNotice(res.data.message || "A verification code was sent to your account email.");
+    } catch (err) {
+      setPasswordError(err.response?.data?.message || "Unable to send a verification code. Please try again.");
+    } finally {
+      setPasswordLoading(false);
+    }
+  };
+
+  const handleChangePassword = async (event) => {
+    event.preventDefault();
+    if (!/^\d{6}$/.test(passwordForm.code)) {
+      setPasswordError("Enter the six-digit verification code from your email.");
+      return;
+    }
+    if (
+      passwordForm.password.length < 8 ||
+      passwordForm.password.length > 12 ||
+      !/[A-Za-z]/.test(passwordForm.password) ||
+      !/\d/.test(passwordForm.password) ||
+      !/[^A-Za-z0-9]/.test(passwordForm.password)
+    ) {
+      setPasswordError("Use 8–12 characters with a letter, a number, and a symbol.");
+      return;
+    }
+    if (passwordForm.password !== passwordForm.confirmPassword) {
+      setPasswordError("The new passwords do not match.");
+      return;
+    }
+
+    setPasswordLoading(true);
+    setPasswordError("");
+    setPasswordNotice("");
+    try {
+      await userApi.post("/password/change", {
+        code: passwordForm.code,
+        password: passwordForm.password,
+      });
+      logoutUser();
+      navigate("/user/login", { replace: true, state: { passwordChanged: true } });
+    } catch (err) {
+      setPasswordError(err.response?.data?.message || "Unable to change your password. Please try again.");
+    } finally {
+      setPasswordLoading(false);
     }
   };
 
@@ -286,6 +346,108 @@ export default function ProfilePage() {
               ))}
             </div>
           </div>
+          <div>
+            <label htmlFor="profile-preferred-workout-time" className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-300">Preferred workout time</label>
+            <select
+              id="profile-preferred-workout-time"
+              value={form.preferred_workout_time}
+              onChange={(e) => handleChange("preferred_workout_time", e.target.value)}
+              className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-orange-500 dark:border-white/10 dark:bg-white/5 dark:text-white"
+            >
+              <option value="">Not set</option>
+              <option value="Morning">Morning (6:00 AM – 12:00 PM)</option>
+              <option value="Afternoon">Afternoon (12:00 PM – 5:00 PM)</option>
+              <option value="Evening">Evening (5:00 PM – 10:00 PM)</option>
+              <option value="Flexible">Flexible (6:00 AM – 10:00 PM)</option>
+            </select>
+          </div>
+        </section>
+
+        <section className="space-y-4 rounded-2xl border border-orange-100 bg-white p-5 shadow-sm dark:border-white/5 dark:bg-[#111] sm:p-6">
+          <div>
+            <h2 className="font-bold text-slate-900 dark:text-white">Change password</h2>
+            <p className="mt-1 text-xs text-slate-500">
+              Verify your identity with a one-time code sent to your account email. The code expiry is shown in the email.
+            </p>
+          </div>
+
+          {passwordNotice && (
+            <p role="status" className="rounded-xl border border-green-500/20 bg-green-500/10 px-4 py-3 text-sm text-green-700 dark:text-green-300">
+              {passwordNotice}
+            </p>
+          )}
+          {passwordError && (
+            <p role="alert" className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-700 dark:text-red-300">
+              {passwordError}
+            </p>
+          )}
+
+          <button
+            type="button"
+            onClick={handleRequestPasswordCode}
+            disabled={passwordLoading}
+            className="w-full rounded-xl border border-orange-500 px-4 py-2.5 text-sm font-semibold text-orange-700 transition hover:bg-orange-50 disabled:opacity-60 dark:text-orange-300 dark:hover:bg-orange-500/10"
+          >
+            {passwordLoading ? "Please wait..." : passwordCodeSent ? "Send another verification code" : "Send verification code"}
+          </button>
+
+          <form className="space-y-3" onSubmit={handleChangePassword}>
+            <div>
+              <label htmlFor="profile-password-code" className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-300">
+                Email verification code
+              </label>
+              <input
+                id="profile-password-code"
+                type="text"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                maxLength={6}
+                pattern="[0-9]{6}"
+                required
+                value={passwordForm.code}
+                onChange={(event) => setPasswordForm((current) => ({
+                  ...current,
+                  code: event.target.value.replace(/\D/g, "").slice(0, 6),
+                }))}
+                placeholder="Enter 6-digit code"
+                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-orange-500 dark:border-white/10 dark:bg-white/5 dark:text-white"
+              />
+            </div>
+            <div>
+              <PasswordField
+                label="New password"
+                htmlFor="profile-new-password"
+                name="newPassword"
+                autoComplete="new-password"
+                minLength={8}
+                maxLength={12}
+                required
+                value={passwordForm.password}
+                onChange={(event) => setPasswordForm((current) => ({ ...current, password: event.target.value }))}
+              />
+            </div>
+            <div>
+              <PasswordField
+                label="Confirm new password"
+                htmlFor="profile-confirm-password"
+                name="confirmPassword"
+                autoComplete="new-password"
+                minLength={8}
+                maxLength={12}
+                required
+                value={passwordForm.confirmPassword}
+                onChange={(event) => setPasswordForm((current) => ({ ...current, confirmPassword: event.target.value }))}
+              />
+            </div>
+            <p className="text-xs text-slate-500">Password must be 8–12 characters and include a letter, a number, and a symbol.</p>
+            <button
+              type="submit"
+              disabled={passwordLoading}
+              className="w-full rounded-xl bg-orange-500 py-3 font-bold text-white transition hover:bg-orange-600 disabled:opacity-60"
+            >
+              {passwordLoading ? "Updating password..." : "Verify and change password"}
+            </button>
+          </form>
         </section>
 
         {/* Quick Links */}

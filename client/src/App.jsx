@@ -1,4 +1,4 @@
-import { Routes, Route, Navigate } from "react-router-dom";
+import { Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { UserAuthProvider } from "./context/UserAuthContext";
 import { getUserAuthToken } from "./context/userAuthStorage";
 import { TrainerAuthProvider } from "./context/TrainerAuthContext";
@@ -7,6 +7,7 @@ import { ThemeProvider } from "./context/ThemeContext";
 // Admin
 import DashboardLayout from "./layouts/DashboardLayout";
 import Login from "./pages/Login";
+import AdminResetPassword from "./pages/AdminResetPassword";
 import Dashboard from "./pages/Dashboard";
 import Members from "./pages/Members";
 import Trainers from "./pages/Trainers";
@@ -52,8 +53,9 @@ function AdminProtectedRoute({ children }) {
 }
 
 function UserProtectedRoute({ children }) {
+  const location = useLocation();
   const token = getUserAuthToken();
-  if (!token) return <Navigate to="/user/login" replace />;
+  if (!token) return <Navigate to="/user/login" state={{ from: location }} replace />;
   const savedUser = JSON.parse(localStorage.getItem("avefit_user") || "null");
   if (savedUser?.account_status && savedUser.account_status !== "Active") {
     return <Navigate to="/user/pending" replace />;
@@ -64,8 +66,9 @@ function UserProtectedRoute({ children }) {
 // Guards the post-onboarding dashboard routes: bounces anyone who hasn't
 // finished the assessment/goal/availability/coach flow back into it.
 function DashboardProtectedRoute({ children }) {
+  const location = useLocation();
   const token = getUserAuthToken();
-  if (!token) return <Navigate to="/user/login" replace />;
+  if (!token) return <Navigate to="/user/login" state={{ from: location }} replace />;
   const savedUser = JSON.parse(localStorage.getItem("avefit_user") || "null");
   if (savedUser?.account_status && savedUser.account_status !== "Active") return <Navigate to="/user/pending" replace />;
   if (savedUser && !savedUser.setup_completed) return <Navigate to="/user/assessment" replace />;
@@ -91,6 +94,7 @@ export default function App() {
 
         {/* Admin Portal */}
         <Route path="/login" element={<Login />} />
+        <Route path="/admin/reset-password" element={<AdminResetPassword />} />
         <Route
           path="/admin/*"
           element={

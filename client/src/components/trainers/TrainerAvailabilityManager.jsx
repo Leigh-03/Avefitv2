@@ -6,6 +6,43 @@ import trainerApi from "../../trainerApi";
 const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
 const freshId = () => `${Date.now()}-${Math.random()}`;
+const MIN_AVAILABILITY_TIME = 6 * 60;
+const MAX_AVAILABILITY_TIME = 22 * 60;
+
+const getHoursError = (slots) => {
+  const invalidRange = slots.some((slot) => {
+    const start = timeToMinutes(slot.start_time);
+    const end = timeToMinutes(slot.end_time);
+    return start === null || end === null ||
+      start < MIN_AVAILABILITY_TIME || start > MAX_AVAILABILITY_TIME ||
+      end < MIN_AVAILABILITY_TIME || end > MAX_AVAILABILITY_TIME;
+  });
+  if (invalidRange) return "Coach availability must be between 6:00 AM and 10:00 PM.";
+  if (slots.some((slot) => timeToMinutes(slot.end_time) <= timeToMinutes(slot.start_time))) {
+    return "Each availability slot must end after it starts.";
+  }
+
+  for (let i = 0; i < slots.length; i += 1) {
+    for (let j = i + 1; j < slots.length; j += 1) {
+      const first = slots[i];
+      const second = slots[j];
+      if (
+        Number(first.day_of_week) === Number(second.day_of_week) &&
+        timeToMinutes(first.start_time) < timeToMinutes(second.end_time) &&
+        timeToMinutes(second.start_time) < timeToMinutes(first.end_time)
+      ) {
+        return "Availability time slots on the same day must not overlap.";
+      }
+    }
+  }
+  return "";
+};
+
+function timeToMinutes(value) {
+  if (typeof value !== "string" || !/^([01]\d|2[0-3]):[0-5]\d$/.test(value)) return null;
+  const [hours, minutes] = value.split(":").map(Number);
+  return hours * 60 + minutes;
+}
 
 export default function TrainerAvailabilityManager({
   mode = "trainer",
@@ -19,6 +56,8 @@ export default function TrainerAvailabilityManager({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [hasChanges, setHasChanges] = useState(false);
+  const hoursError = getHoursError(slots);
 
   useEffect(() => {
     let active = true;
@@ -28,12 +67,15 @@ export default function TrainerAvailabilityManager({
     request
       .then(({ data }) => {
         if (active) {
-          setSlots((data.data || []).map((slot) => ({
+          const loadedSlots = (data.data || []).map((slot) => ({
             ...slot,
             id: freshId(),
             start_time: String(slot.start_time).slice(0, 5),
             end_time: String(slot.end_time).slice(0, 5),
-          })));
+          }));
+          setSlots(loadedSlots);
+          setError(getHoursError(loadedSlots));
+          setHasChanges(false);
         }
       })
       .catch((err) => {
@@ -44,20 +86,29 @@ export default function TrainerAvailabilityManager({
   }, [isAdmin, trainerId]);
 
   const addSlot = (dayOfWeek) => {
-    setSlots((current) => [
-      ...current,
+    const updatedSlots = [
+      ...slots,
       { id: freshId(), day_of_week: dayOfWeek, start_time: "09:00", end_time: "17:00" },
-    ]);
+    ];
+    setSlots(updatedSlots);
+    setHasChanges(true);
+    setError(getHoursError(updatedSlots));
     setSuccess("");
   };
 
   const updateSlot = (id, key, value) => {
-    setSlots((current) => current.map((slot) => slot.id === id ? { ...slot, [key]: value } : slot));
+    const updatedSlots = slots.map((slot) => slot.id === id ? { ...slot, [key]: value } : slot);
+    setSlots(updatedSlots);
+    setHasChanges(true);
+    setError(getHoursError(updatedSlots));
     setSuccess("");
   };
 
   const removeSlot = (id) => {
-    setSlots((current) => current.filter((slot) => slot.id !== id));
+    const updatedSlots = slots.filter((slot) => slot.id !== id);
+    setSlots(updatedSlots);
+    setHasChanges(true);
+    setError(getHoursError(updatedSlots));
     setSuccess("");
   };
 
@@ -65,6 +116,11 @@ export default function TrainerAvailabilityManager({
     setSaving(true);
     setError("");
     setSuccess("");
+    if (hoursError) {
+      setError(hoursError);
+      setSaving(false);
+      return;
+    }
     try {
       const availability = slots.map(({ day_of_week, start_time, end_time }) => ({
         day_of_week: Number(day_of_week),
@@ -80,6 +136,8 @@ export default function TrainerAvailabilityManager({
         start_time: String(slot.start_time).slice(0, 5),
         end_time: String(slot.end_time).slice(0, 5),
       })));
+      setHasChanges(false);
+      setError("");
       setSuccess("Availability saved.");
     } catch (err) {
       setError(err.response?.data?.message || "Unable to save coach availability.");
@@ -98,11 +156,11 @@ export default function TrainerAvailabilityManager({
           </h2>
         </div>
         <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-          Set recurring weekly time windows. Coaches and admins can add multiple non-overlapping windows per day.
+          Set recurring weekly time windows between 6:00 AM and 10:00 PM. Coaches and admins can add multiple non-overlapping windows per day.
         </p>
       </div>
 
-      {error && <p role="alert" className="rounded-xl bg-red-50 p-3 text-sm text-red-700 dark:bg-red-500/10 dark:text-red-300">{error}</p>}
+      {(error || hoursError) && <p role="alert" className="rounded-xl bg-red-50 p-3 text-sm text-red-700 dark:bg-red-500/10 dark:text-red-300">{error || hoursError}</p>}
       {success && <p role="status" className="rounded-xl bg-green-50 p-3 text-sm text-green-700 dark:bg-green-500/10 dark:text-green-300">{success}</p>}
 
       {loading ? (
@@ -133,18 +191,24 @@ export default function TrainerAvailabilityManager({
                         <input
                           id={`start-${slot.id}`}
                           type="time"
+                          min="06:00"
+                          max="22:00"
+                          aria-invalid={timeToMinutes(slot.start_time) === null || timeToMinutes(slot.start_time) < MIN_AVAILABILITY_TIME}
                           value={slot.start_time}
                           onChange={(event) => updateSlot(slot.id, "start_time", event.target.value)}
-                          className="rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm text-slate-800 dark:border-gray-700 dark:bg-[#111] dark:text-white"
+                          className={`rounded-lg border bg-white px-2 py-2 text-sm text-slate-800 dark:bg-[#111] dark:text-white ${timeToMinutes(slot.start_time) < MIN_AVAILABILITY_TIME ? "border-red-500 dark:border-red-500" : "border-slate-300 dark:border-gray-700"}`}
                         />
                         <span className="text-sm text-slate-400">to</span>
                         <label className="sr-only" htmlFor={`end-${slot.id}`}>{day} end time</label>
                         <input
                           id={`end-${slot.id}`}
                           type="time"
+                          min="06:00"
+                          max="22:00"
+                          aria-invalid={timeToMinutes(slot.end_time) === null || timeToMinutes(slot.end_time) > MAX_AVAILABILITY_TIME}
                           value={slot.end_time}
                           onChange={(event) => updateSlot(slot.id, "end_time", event.target.value)}
-                          className="rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm text-slate-800 dark:border-gray-700 dark:bg-[#111] dark:text-white"
+                          className={`rounded-lg border bg-white px-2 py-2 text-sm text-slate-800 dark:bg-[#111] dark:text-white ${timeToMinutes(slot.end_time) > MAX_AVAILABILITY_TIME ? "border-red-500 dark:border-red-500" : "border-slate-300 dark:border-gray-700"}`}
                         />
                         <button
                           type="button"
@@ -164,7 +228,12 @@ export default function TrainerAvailabilityManager({
         </div>
       )}
 
-      <div className="flex justify-end gap-3">
+      <div className={`flex items-center justify-between gap-3 ${isAdmin ? "justify-end" : "sticky bottom-3 z-10 rounded-xl border border-slate-200 bg-white/95 p-3 shadow-lg backdrop-blur dark:border-white/10 dark:bg-[#111]/95"}`}>
+        {!isAdmin && (
+          <p className="text-xs font-medium text-slate-500 dark:text-slate-400">
+            {hasChanges ? "Unsaved changes" : success || "Availability is up to date"}
+          </p>
+        )}
         {onClose && (
           <button type="button" onClick={onClose} className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-600 dark:border-gray-700 dark:text-slate-300">
             Close
@@ -173,10 +242,10 @@ export default function TrainerAvailabilityManager({
         <button
           type="button"
           onClick={save}
-          disabled={loading || saving}
+          disabled={loading || saving || Boolean(hoursError) || !hasChanges}
           className="inline-flex items-center gap-2 rounded-xl bg-orange-500 px-4 py-2 text-sm font-semibold text-white hover:bg-orange-600 disabled:opacity-50"
         >
-          <Save size={16} /> {saving ? "Saving…" : "Save availability"}
+          <Save size={16} /> {saving ? "Saving…" : hasChanges ? "Save changes" : "Saved"}
         </button>
       </div>
     </div>

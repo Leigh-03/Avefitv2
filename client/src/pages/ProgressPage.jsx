@@ -5,13 +5,9 @@ import { Activity, ArrowDownRight, ArrowUpRight, Calendar, CheckCircle2, Scale, 
 import userApi from "../userApi";
 import { useUserAuth } from "../context/UserAuthContext";
 import { formatPhilippinesDate, philippinesDateKey, philippinesDateString, philippinesMondayString, philippinesPeriodRange } from "../utils/philippinesDate";
+import { getWorkoutDayGroups } from "../utils/workoutSessions";
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend, Filler);
-
-const getWorkoutDate = (session) => {
-  const value = session.completed_at || session.session_date;
-  return philippinesDateKey(value);
-};
 
 const weightInput = (val, prev = "") => {
   const cleaned = String(val || "").replace(/[^0-9.]/g, "").replace(/(\..*)\./g, "$1");
@@ -177,10 +173,11 @@ export default function ProgressPage() {
   const periodWeightChange = periodWeightedLogs.length > 1
     ? Number((Number(periodWeightedLogs[periodWeightedLogs.length - 1].weight) - Number(periodWeightedLogs[0].weight)).toFixed(1))
     : null;
-  const periodCompletedWorkouts = sessions.filter((session) => {
-    const date = getWorkoutDate(session);
-    return session.completed && date && date >= analyticsRange.start && date <= analyticsRange.end;
-  }).length;
+  const workoutDayGroups = getWorkoutDayGroups(sessions);
+  const completedWorkoutDays = workoutDayGroups.filter((group) => group.isComplete);
+  const periodCompletedWorkouts = completedWorkoutDays.filter((group) => (
+    group.completionDate >= analyticsRange.start && group.completionDate <= analyticsRange.end
+  )).length;
 
   const chartData = {
     labels: periodLogs.map((l) => formatPhilippinesDate(l.log_date, { month: "short", day: "numeric" })),
@@ -212,15 +209,12 @@ export default function ProgressPage() {
 
   const today = philippinesDateString();
   const weekStartString = philippinesMondayString();
-  const scheduledThisWeek = sessions.filter((session) => {
-    const date = philippinesDateKey(session.session_date);
-    return date && date >= weekStartString && date <= today;
-  });
-  const completedThisWeek = sessions.filter((session) => {
-    const date = getWorkoutDate(session);
-    return session.completed && date >= weekStartString && date <= today;
-  });
-  const completedSessions = sessions.filter((session) => session.completed);
+  const scheduledThisWeek = workoutDayGroups.filter((group) => (
+    group.scheduledDate >= weekStartString && group.scheduledDate <= today
+  ));
+  const completedThisWeek = completedWorkoutDays.filter((group) => (
+    group.completionDate >= weekStartString && group.completionDate <= today
+  ));
   const weeklyTarget = Number(profile?.workout_days_per_week) ||
     (Array.isArray(profile?.preferred_days) ? profile.preferred_days.length : 0);
   const workoutRate = scheduledThisWeek.length
@@ -299,7 +293,7 @@ export default function ProgressPage() {
                 </div>
                 <div className="rounded-xl bg-slate-50 p-3 dark:bg-white/[0.04]">
                   <p className="text-lg font-bold text-slate-900 dark:text-white">{periodCompletedWorkouts}</p>
-                  <p className="text-[11px] leading-snug text-slate-500">Workouts completed</p>
+                  <p className="text-[11px] leading-snug text-slate-500">Workout days completed</p>
                 </div>
               </div>
 
@@ -352,9 +346,9 @@ export default function ProgressPage() {
               <div className="rounded-2xl border border-orange-100 bg-white p-4 shadow-sm dark:border-white/5 dark:bg-[#111]">
                 <CheckCircle2 size={19} className="mb-3 text-orange-500" />
                 <p className="text-2xl font-black">{completedThisWeek.length}</p>
-                <p className="mt-1 text-xs text-slate-500">Workouts completed this week</p>
+                <p className="mt-1 text-xs text-slate-500">Workout days completed this week</p>
                 <p className="mt-2 text-xs text-slate-500">
-                  {weeklyTarget ? `Goal: ${weeklyTarget} per week` : `${completedSessions.length} completed all time`}
+                  {weeklyTarget ? `Goal: ${weeklyTarget} per week` : `${completedWorkoutDays.length} completed all time`}
                 </p>
               </div>
               <div className="rounded-2xl border border-orange-100 bg-white p-4 shadow-sm dark:border-white/5 dark:bg-[#111]">

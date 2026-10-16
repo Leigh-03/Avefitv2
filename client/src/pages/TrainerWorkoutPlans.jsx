@@ -8,6 +8,9 @@ const statusColors = {
   Completed: "border-orange-200 bg-orange-50 text-orange-800 dark:border-orange-500/20 dark:bg-orange-500/10 dark:text-orange-300",
 };
 
+const INTENSITY_LABELS = ["", "Light", "Easy", "Moderate", "Intense", "Very Intense"];
+const EXERCISE_DIFFICULTIES = ["Beginner", "Intermediate", "Advanced"];
+
 const localDateString = (date) => {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
@@ -20,6 +23,13 @@ const toList = (value) => {
   if (typeof value !== "string" || !value.trim()) return [];
   return value.replace(/^\{|\}$/g, "").split(",").map((item) => item.trim()).filter(Boolean);
 };
+
+const formatPreferredWorkoutTime = (value) => ({
+  Morning: "Morning (6:00 AM – 12:00 PM)",
+  Afternoon: "Afternoon (12:00 PM – 5:00 PM)",
+  Evening: "Evening (5:00 PM – 10:00 PM)",
+  Flexible: "Flexible (6:00 AM – 10:00 PM)",
+}[value] || "Not specified");
 
 const calculateBmi = (member) => {
   const weight = Number(member.latest_weight ?? member.weight);
@@ -62,6 +72,12 @@ function PlanModal({ members, exercises, onClose, onSave }) {
   const [fieldErrors, setFieldErrors] = useState({});
   const selectedMember = members.find((member) => String(member.user_id) === form.user_id);
   const availableDays = toList(selectedMember?.preferred_days);
+  const preferredDifficulty = EXERCISE_DIFFICULTIES.find(
+    (difficulty) => difficulty.toLowerCase() === String(selectedMember?.activity_level || "").trim().toLowerCase()
+  );
+  const matchingExercises = preferredDifficulty
+    ? exercises.filter((exercise) => String(exercise.difficulty || "").trim().toLowerCase() === preferredDifficulty.toLowerCase())
+    : [];
 
   const setFieldError = (field, message) => {
     setFieldErrors((current) => ({ ...current, [field]: message }));
@@ -172,12 +188,19 @@ function PlanModal({ members, exercises, onClose, onSave }) {
                 onChange={(event) => {
                   const member = members.find((item) => String(item.user_id) === event.target.value);
                   const goal = member?.fitness_goal || "";
+                  const memberDifficulty = String(member?.activity_level || "").trim().toLowerCase();
                   setForm({
                     ...form,
                     user_id: event.target.value,
                     goal,
                     session_date: member ? nextPreferredDate(member.preferred_days) : "",
                     plan_name: form.plan_name || (member ? `${member.first_name}'s Workout Routine` : ""),
+                    sessions: form.sessions.map((session) => {
+                      const exercise = exercises.find((item) => String(item.exercise_id) === String(session.exercise_id));
+                      return !exercise || String(exercise.difficulty || "").trim().toLowerCase() === memberDifficulty
+                        ? session
+                        : { ...session, exercise_id: "" };
+                    }),
                   });
                   setFieldErrors((current) => ({
                     ...current,
@@ -253,9 +276,10 @@ function PlanModal({ members, exercises, onClose, onSave }) {
                   ["BMI", calculateBmi(selectedMember)],
                   ["Activity", selectedMember.activity_level || "Not specified"],
                   ["Preferred days", toList(selectedMember.preferred_days).join(", ") || "Not specified"],
+                  ["Preferred time", formatPreferredWorkoutTime(selectedMember.preferred_workout_time)],
                   ["Weekly frequency", selectedMember.workout_days_per_week ? `${selectedMember.workout_days_per_week} days` : "Not specified"],
                   ["Session length", selectedMember.workout_duration ? `${selectedMember.workout_duration} min` : "Not specified"],
-                  ["Intensity", selectedMember.intensity || "Not specified"],
+                  ["Preferred intensity", INTENSITY_LABELS[Number(selectedMember.intensity)] || "Not specified"],
                 ].map(([label, value]) => (
                   <div key={label}>
                     <p className="text-xs text-slate-500">{label}</p>
@@ -305,7 +329,13 @@ function PlanModal({ members, exercises, onClose, onSave }) {
             <div className="mb-3 flex items-center justify-between">
               <div>
                 <p className="text-sm font-semibold text-slate-800 dark:text-white">Routine Exercises *</p>
-                <p className="text-xs text-slate-500">Choose exercises and set the prescription for this date.</p>
+                <p className="text-xs text-slate-500">
+                  {selectedMember
+                    ? preferredDifficulty
+                      ? `Showing ${preferredDifficulty} exercises to match this member's experience level.`
+                      : "This member has no supported experience level for exercise filtering."
+                    : "Select a member to see exercises that match their experience level."}
+                </p>
               </div>
               <button
                 type="button"
@@ -337,21 +367,39 @@ function PlanModal({ members, exercises, onClose, onSave }) {
               {form.sessions.map((session, index) => (
                 <div key={`session-${index}`} className="grid grid-cols-2 items-start gap-2 rounded-xl border border-slate-200 p-3 dark:border-slate-800 sm:grid-cols-[minmax(0,1fr)_104px_104px_36px]">
                   <div className="col-span-2 sm:col-span-1">
+                    <div className="relative">
                     <select
                       id={`sessions-${index}-exercise_id`}
                       aria-label={`Exercise ${index + 1}`}
                       value={session.exercise_id}
                       required
+                      disabled={!selectedMember || !preferredDifficulty}
                       onChange={(event) => updateSessionField(index, "exercise_id", event.target.value)}
                       aria-invalid={Boolean(fieldErrors[`sessions.${index}.exercise_id`])}
                       aria-describedby={fieldErrors[`sessions.${index}.exercise_id`] ? `sessions-${index}-exercise_id-error` : undefined}
-                      className={`${inputClass(`sessions.${index}.exercise_id`)} px-3 py-2`}
+                      className={`${inputClass(`sessions.${index}.exercise_id`)} appearance-none px-3 py-2 pr-10`}
                     >
-                      <option value="">Select exercise...</option>
-                      {exercises.map((exercise) => (
-                        <option key={exercise.exercise_id} value={exercise.exercise_id}>{exercise.exercise_name}</option>
+                      <option value="">
+                        {!selectedMember
+                          ? "Select a member first..."
+                          : !preferredDifficulty
+                            ? "Member experience level unavailable"
+                            : matchingExercises.length
+                              ? "Select exercise..."
+                              : `No ${preferredDifficulty} exercises available`}
+                      </option>
+                      {matchingExercises.map((exercise) => (
+                        <option key={exercise.exercise_id} value={exercise.exercise_id}>
+                          {exercise.exercise_name} · {exercise.difficulty}
+                        </option>
                       ))}
                     </select>
+                    <ChevronDown
+                      aria-hidden="true"
+                      size={18}
+                      className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-500"
+                    />
+                    </div>
                     {renderFieldError(`sessions.${index}.exercise_id`)}
                   </div>
                   <div className="min-w-0">

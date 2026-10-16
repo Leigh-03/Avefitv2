@@ -5,6 +5,12 @@ import { useNavigate } from "react-router-dom";
 const daysPerWeekOptions = ["1", "2", "3", "4", "5", "6", "7"];
 const durationOptions = ["30 mins", "45 mins", "60 mins", "90 mins"];
 const preferredDays = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+const preferredWorkoutTimes = [
+  { value: "Morning", label: "Morning", detail: "6:00 AM – 12:00 PM" },
+  { value: "Afternoon", label: "Afternoon", detail: "12:00 PM – 5:00 PM" },
+  { value: "Evening", label: "Evening", detail: "5:00 PM – 10:00 PM" },
+  { value: "Flexible", label: "Flexible", detail: "Any time from 6:00 AM to 10:00 PM" },
+];
 
 function Chip({ label, selected, onClick }) {
   return (
@@ -26,6 +32,7 @@ export default function Availability() {
   // Single-select: only one "days per week" value and one "duration" value can be chosen.
   const [daysPerWeek, setDaysPerWeek] = useState("3");
   const [duration, setDuration] = useState("45 mins");
+  const [preferredWorkoutTime, setPreferredWorkoutTime] = useState("");
   // Multi-select: which specific days of the week the user will actually train.
   const [days, setDays] = useState([]);
   const [error, setError] = useState("");
@@ -51,6 +58,10 @@ export default function Availability() {
   };
 
   const handleContinue = () => {
+    if (!preferredWorkoutTime) {
+      setError("Please choose your preferred workout time.");
+      return;
+    }
     if (days.length === 0) {
       setError("Please select at least one preferred workout day.");
       return;
@@ -62,7 +73,7 @@ export default function Availability() {
 
     sessionStorage.setItem(
       "avefit_availability",
-      JSON.stringify({ daysPerWeek, duration, days })
+      JSON.stringify({ daysPerWeek, duration, days, preferredWorkoutTime })
     );
 
     navigate("/user/coach");
@@ -87,6 +98,32 @@ export default function Availability() {
         ))}
       </div>
     </div>
+
+    {/* Preferred Workout Time — single select */}
+    <fieldset className="mb-6">
+      <legend className="mb-3 block text-sm font-medium text-slate-600">Preferred Workout Time</legend>
+      <div className="grid grid-cols-2 gap-2">
+        {preferredWorkoutTimes.map((time) => (
+          <button
+            key={time.value}
+            type="button"
+            aria-pressed={preferredWorkoutTime === time.value}
+            onClick={() => {
+              setPreferredWorkoutTime(time.value);
+              setError("");
+            }}
+            className={`rounded-xl border-2 px-3 py-3 text-left transition ${
+              preferredWorkoutTime === time.value
+                ? "border-orange-500 bg-orange-500/10 text-orange-700 dark:text-orange-300"
+                : "border-slate-200 text-slate-700 hover:border-orange-300 dark:border-white/10 dark:text-slate-200"
+            }`}
+          >
+            <span className="block text-sm font-semibold">{time.label}</span>
+            <span className="mt-0.5 block text-xs text-slate-500 dark:text-slate-400">{time.detail}</span>
+          </button>
+        ))}
+      </div>
+    </fieldset>
 
     {/* Workout Duration — single select */}
     <div className="mb-6">

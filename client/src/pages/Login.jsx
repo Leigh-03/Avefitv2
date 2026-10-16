@@ -35,7 +35,14 @@ export default function Login() {
       title="Admin sign in"
       subtitle="Manage members, trainers, workouts and analytics."
       footer={
-        <p className="mt-6 text-center text-sm text-slate-500">
+        <div className="mt-6 flex flex-col items-center gap-3 text-sm text-slate-500">
+          <button
+            type="button"
+            onClick={() => navigate("/admin/reset-password")}
+            className="rounded font-medium transition hover:text-orange-600"
+          >
+            Forgot your password?
+          </button>
           <button
             type="button"
             onClick={() => navigate("/")}
@@ -43,7 +50,7 @@ export default function Login() {
           >
             &larr; Back to homepage
           </button>
-        </p>
+        </div>
       }
     >
       <form

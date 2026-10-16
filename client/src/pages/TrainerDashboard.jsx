@@ -37,6 +37,16 @@ function formatDuration(value) {
   return /mins?$/i.test(text) ? text : `${text} mins`;
 }
 
+function formatPreferredWorkoutTime(value) {
+  const labels = {
+    Morning: "Morning (6:00 AM – 12:00 PM)",
+    Afternoon: "Afternoon (12:00 PM – 5:00 PM)",
+    Evening: "Evening (5:00 PM – 10:00 PM)",
+    Flexible: "Flexible (6:00 AM – 10:00 PM)",
+  };
+  return labels[value] || "Not specified";
+}
+
 function toList(val) {
   if (!val) return [];
   if (Array.isArray(val)) return val.filter(Boolean);
@@ -70,7 +80,7 @@ function MemberProfileModal({ member, onClose }) {
           {[['Phone',member.phone],['Gender',member.gender],['Age',member.age?`${member.age} yrs`:'—'],['Height',member.height?`${member.height} cm`:'—'],['Weight',currentWeight?`${currentWeight} kg`:'—'],['Target Weight',member.target_weight?`${member.target_weight} kg`:'—'],['BMI',currentBmi||'—'],['Goal',member.fitness_goal||'—']].map(([l,v])=><div key={l} className="rounded-xl bg-slate-50 dark:bg-slate-900 p-3"><p className="text-xs text-slate-400">{l}</p><p className="mt-1 font-semibold text-slate-700 dark:text-slate-200 break-words">{v}</p></div>)}
         </div>
         {(injuries.length || conditions.length) ? <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4"><p className="flex items-center gap-2 text-amber-400 font-semibold text-sm"><AlertTriangle size={16}/> Health &amp; Safety Notes</p><div className="flex flex-wrap gap-2 mt-3">{injuries.map(x=><span key={`i-${x}`} className="px-2.5 py-1 rounded-full bg-amber-500/15 text-amber-300 text-xs">Injury: {x}</span>)}{conditions.map(x=><span key={`c-${x}`} className="px-2.5 py-1 rounded-full bg-amber-500/15 text-amber-300 text-xs">{x}</span>)}</div></div> : null}
-        <div className="rounded-2xl border border-slate-200 dark:border-slate-800 p-4"><p className="text-xs uppercase tracking-wider font-bold text-slate-400 mb-2">Training Preferences</p><p className="text-sm text-slate-600 dark:text-slate-300">{toList(member.preferred_days).join(', ') || 'No preferred days set.'}</p><p className="text-xs text-slate-400 mt-2">{member.workout_days_per_week ? `${member.workout_days_per_week} days/week` : 'Days/week not set'}{member.workout_duration ? ` · ${formatDuration(member.workout_duration)}` : ''}</p></div>
+        <div className="rounded-2xl border border-slate-200 dark:border-slate-800 p-4"><p className="text-xs uppercase tracking-wider font-bold text-slate-400 mb-2">Training Preferences</p><p className="text-sm text-slate-600 dark:text-slate-300">{toList(member.preferred_days).join(', ') || 'No preferred days set.'}</p><p className="text-xs text-slate-400 mt-2">{member.workout_days_per_week ? `${member.workout_days_per_week} days/week` : 'Days/week not set'}{member.workout_duration ? ` · ${formatDuration(member.workout_duration)}` : ''}</p><p className="mt-2 text-xs text-slate-500 dark:text-slate-400"><span className="font-semibold">Preferred time:</span> {formatPreferredWorkoutTime(member.preferred_workout_time)}</p></div>
       </div>
     </div>
   </div>;

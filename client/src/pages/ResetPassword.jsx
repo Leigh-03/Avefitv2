@@ -1,20 +1,22 @@
 import { useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import AuthShell from "../components/layout/AuthShell";
 import { Alert, Field, PasswordField, PrimaryButton } from "../components/ui/Form";
 import userApi from "../userApi";
 
 export default function ResetPassword() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [searchParams] = useSearchParams();
   const token = searchParams.get("token") || "";
 
-  const [email, setEmail] = useState("");
+  const [email, setEmail] = useState(location.state?.email || "");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [resetComplete, setResetComplete] = useState(false);
 
   const handleRequestReset = async (event) => {
     event.preventDefault();
@@ -63,6 +65,8 @@ export default function ResetPassword() {
     try {
       const res = await userApi.post("/reset-password", { token, password });
       setNotice(res.data.message || "Your password has been reset.");
+      setResetComplete(true);
+      navigate("/user/reset-password?reset=complete", { replace: true });
     } catch (err) {
       setError(err.response?.data?.message || "Unable to reset your password right now.");
     } finally {
@@ -74,8 +78,8 @@ export default function ResetPassword() {
     <AuthShell
       width="max-w-lg"
       glass
-      title={token ? "Reset your password" : "Forgot your password?"}
-      subtitle={token ? "Choose a new password for your account." : "We can send you a secure reset link."}
+      title={resetComplete ? "Password reset complete" : token ? "Reset your password" : "Forgot your password?"}
+      subtitle={resetComplete ? "Your password has been updated." : token ? "Choose a new password for your account." : "We can send you a secure reset link."}
       footer={
         <p className="mt-6 text-center text-sm text-slate-500">
           <button
@@ -88,7 +92,17 @@ export default function ResetPassword() {
         </p>
       }
     >
-      {token ? (
+      {resetComplete ? (
+        <div className="space-y-4">
+          {notice && <Alert tone="info">{notice}</Alert>}
+          <PrimaryButton
+            type="button"
+            onClick={() => navigate("/user/login", { replace: true })}
+          >
+            Back to login
+          </PrimaryButton>
+        </div>
+      ) : token ? (
         <form className="space-y-4" onSubmit={handleResetPassword}>
           {notice && <Alert tone="info">{notice}</Alert>}
           {error && <Alert tone="error">{error}</Alert>}

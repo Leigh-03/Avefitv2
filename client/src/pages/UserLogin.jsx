@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { MailCheck } from "lucide-react";
 import { GoogleLogin, GoogleOAuthProvider } from "@react-oauth/google";
 import AuthShell from "../components/layout/AuthShell";
@@ -13,7 +13,57 @@ const TABS = [
   { id: "signup", label: "Sign up" },
 ];
 
+const SIGNUP_NAME_PATTERN = /^[A-Za-zÀ-ÿ' -]+$/;
+const COMMON_PASSWORDS = new Set([
+  "password", "password1", "password123", "12345678", "123456789",
+  "1234567890", "qwerty123", "qwertyuiop", "admin123", "admin1234",
+  "avefit123", "letmein123", "welcome123", "iloveyou1", "abc123456",
+  "changeme1",
+]);
+
+function getSignupValidationError(form) {
+  const firstName = form.first_name.trim();
+  const lastName = form.last_name.trim();
+  const email = form.email.trim();
+  const phone = form.phone.trim();
+  const password = form.password;
+
+  if (!firstName) return "Enter your first name.";
+  if (!lastName) return "Enter your last name.";
+  if (
+    firstName.length < 2 ||
+    firstName.length > 50 ||
+    !SIGNUP_NAME_PATTERN.test(firstName) ||
+    lastName.length < 2 ||
+    lastName.length > 50 ||
+    !SIGNUP_NAME_PATTERN.test(lastName)
+  ) {
+    return "First and last names must be 2–50 characters and use letters, spaces, apostrophes, or hyphens.";
+  }
+  if (!email) return "Enter your email address.";
+  if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/i.test(email)) {
+    return "Enter a valid email address, such as name@example.com.";
+  }
+  if (!phone) return "Enter your phone number.";
+  if (phone && !/^09\d{9}$/.test(phone)) {
+    return "Phone number must start with 09 and contain exactly 11 digits.";
+  }
+  if (!password) return "Enter a password.";
+  if (password.length < 8 || password.length > 12) {
+    return "Password must be 8–12 characters long.";
+  }
+  if (!/[A-Za-z]/.test(password)) return "Password must include at least one letter.";
+  if (!/\d/.test(password)) return "Password must include at least one number.";
+  if (!/[^A-Za-z0-9]/.test(password)) return "Password must include at least one symbol.";
+  if (COMMON_PASSWORDS.has(password.toLowerCase())) {
+    return "Choose a less common password.";
+  }
+  if (!form.agreed) return "Please agree to the Terms and Conditions.";
+  return "";
+}
+
 export default function UserLogin() {
+  const location = useLocation();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { loginUser } = useUserAuth();
@@ -26,7 +76,6 @@ export default function UserLogin() {
   const [pendingNotice, setPendingNotice] = useState(false);
   const [unverifiedEmail, setUnverifiedEmail] = useState("");
   const [resendNotice, setResendNotice] = useState("");
-  const [resetNotice, setResetNotice] = useState("");
   const [resending, setResending] = useState(false);
 
   const [loginForm, setLoginForm] = useState({
@@ -37,14 +86,24 @@ export default function UserLogin() {
     first_name: "",
     last_name: "",
     email: "",
-    phone: "09",
+    phone: "",
     password: "",
     agreed: false,
   });
   const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
 
   const goToDestination = (user) => {
-    navigate(user?.setup_completed ? "/user/workout" : "/user/assessment", { replace: true });
+    const returnLocation = location.state?.from;
+    const returnPath = returnLocation?.pathname;
+    const isValidReturnPath = typeof returnPath === "string"
+      && returnPath.startsWith("/user/")
+      && !["/user/login", "/user/pending", "/user/reset-password"].includes(returnPath);
+    const destination = user?.setup_completed
+      ? isValidReturnPath
+        ? `${returnPath}${returnLocation.search || ""}${returnLocation.hash || ""}`
+        : "/user/workout"
+      : "/user/assessment";
+    navigate(destination, { replace: true });
   };
 
   const handleLogin = async () => {
@@ -90,18 +149,17 @@ export default function UserLogin() {
       setError("Please agree to the Terms and Conditions before creating your account.");
       return;
     }
-    if (mode === "signup" && !/^09\d{9}$/.test(signupForm.phone)) {
-      setError("Enter a valid phone number starting with 09 before continuing with Google.");
+    if (mode === "signup" && signupForm.phone && !/^09\d{9}$/.test(signupForm.phone)) {
+      setError("Phone number must start with 09 and contain exactly 11 digits, or leave it blank.");
       return;
     }
-
     setLoading(true);
     setError("");
     try {
       const res = await userApi.post("/google-login", {
         credential,
         intent: mode,
-        phone: signupForm.phone,
+        phone: signupForm.phone || null,
         first_name: signupForm.first_name,
         last_name: signupForm.last_name,
         termsAccepted: signupForm.agreed,
@@ -120,7 +178,8 @@ export default function UserLogin() {
         setError(err.response?.data?.message || "Your account was not approved.");
       } else if (code === "SIGNUP_REQUIRED") {
         setMode("signup");
-        setError("No AveFit account was found. Enter your phone number, accept the Terms, and continue with Google to sign up.");
+        navigate("/user/login?mode=signup", { replace: true });
+        setError("No AveFit account was found. Accept the Terms, then continue with Google to create your account. A phone number is optional for Google sign-up.");
       } else {
         setError(err.response?.data?.message || "Google sign-in failed. Please try again.");
       }
@@ -146,42 +205,10 @@ export default function UserLogin() {
     }
   };
 
-  const handleForgotPassword = async () => {
-    const email = loginForm.email.trim();
-
-    if (!email) {
-      setError("Enter your email address to reset your password.");
-      return;
-    }
-
-    setLoading(true);
-    setError("");
-    setResetNotice("");
-
-    try {
-      const res = await userApi.post("/forgot-password", { email });
-      setResetNotice(res.data.message || "If that account exists, a password reset link has been sent.");
-    } catch (err) {
-      setError(err.response?.data?.message || "Unable to send the reset email right now.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const handleSignup = async () => {
-    if (
-      !signupForm.first_name ||
-      !signupForm.last_name ||
-      !signupForm.email ||
-      !signupForm.phone ||
-      !signupForm.password
-    ) {
-      setError("Please fill in all fields.");
-      return;
-    }
-
-    if (!signupForm.agreed) {
-      setError("Please agree to the Terms and Conditions.");
+    const validationError = getSignupValidationError(signupForm);
+    if (validationError) {
+      setError(validationError);
       return;
     }
 
@@ -189,10 +216,14 @@ export default function UserLogin() {
     setError("");
 
     try {
-      await userApi.post("/register", signupForm);
+      const response = await userApi.post("/register", signupForm);
       // Remembered so the pending screen can prefill the verification form.
       sessionStorage.setItem("avefit_pending_email", signupForm.email.trim());
       sessionStorage.removeItem("avefit_pending_email_verified");
+      sessionStorage.setItem(
+        "avefit_verification_email_delivery_failed",
+        String(response.data?.email_sent !== true)
+      );
       navigate("/user/pending", { replace: true });
     } catch (err) {
       setError(err.response?.data?.message || "Registration failed.");
@@ -203,6 +234,7 @@ export default function UserLogin() {
 
   const switchTab = (next) => {
     setMode(next);
+    navigate(next === "signup" ? "/user/login?mode=signup" : "/user/login", { replace: true });
     setError("");
     setPendingNotice(false);
     setResendNotice("");
@@ -310,6 +342,11 @@ export default function UserLogin() {
             handleLogin();
           }}
         >
+          {location.state?.passwordChanged && (
+            <Alert tone="info">
+              Your password was changed successfully. Log in with your new password.
+            </Alert>
+          )}
           <Field
             label="Email address"
             htmlFor="user-login-email"
@@ -399,18 +436,17 @@ export default function UserLogin() {
           <div className="text-center">
             <button
               type="button"
-              onClick={handleForgotPassword}
+              onClick={() => navigate("/user/reset-password", { state: { email: loginForm.email } })}
               className="text-sm font-semibold text-orange-600 transition hover:text-orange-700 dark:text-orange-400 dark:hover:text-orange-300"
             >
               Forgot password?
             </button>
           </div>
-
-          {resetNotice && <Alert tone="info">{resetNotice}</Alert>}
         </form>
       ) : (
         <form
           className="space-y-4"
+          noValidate
           onSubmit={(e) => {
             e.preventDefault();
             handleSignup();
@@ -431,6 +467,7 @@ export default function UserLogin() {
               htmlFor="signup-first"
               autoComplete="given-name"
               placeholder="Juan"
+              maxLength={50}
               value={signupForm.first_name}
               onChange={(e) => setSignupForm({ ...signupForm, first_name: e.target.value })}
             />
@@ -439,6 +476,7 @@ export default function UserLogin() {
               htmlFor="signup-last"
               autoComplete="family-name"
               placeholder="dela Cruz"
+              maxLength={50}
               value={signupForm.last_name}
               onChange={(e) => setSignupForm({ ...signupForm, last_name: e.target.value })}
             />

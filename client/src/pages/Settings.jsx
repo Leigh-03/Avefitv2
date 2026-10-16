@@ -17,11 +17,11 @@ export default function Settings() {
   const [photo, setPhoto] = useState(null);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [photoMsg, setPhotoMsg] = useState("");
-  const [passwords, setPasswords] = useState({ current_password: "", new_password: "", confirm: "" });
+  const [passwordRequest, setPasswordRequest] = useState({ loading: false, message: "", error: "" });
   const [notifications, setNotifications] = useState(DEFAULT_NOTIFICATION_PREFERENCES);
   const [preferenceError, setPreferenceError] = useState("");
-  const [status, setStatus] = useState({ profile: "", password: "" });
-  const [loading, setLoading] = useState({ profile: false, password: false });
+  const [status, setStatus] = useState({ profile: "" });
+  const [loading, setLoading] = useState({ profile: false });
   const [fetchError, setFetchError] = useState("");
 
   useEffect(() => {
@@ -101,38 +101,22 @@ export default function Settings() {
     }
   };
 
-  const handleSavePassword = async () => {
-    if (passwords.new_password !== passwords.confirm) {
-      setStatus((s) => ({ ...s, password: "mismatch" }));
-      return;
-    }
-    if (passwords.new_password.length < 8 || passwords.new_password.length > 12) {
-      setStatus((s) => ({ ...s, password: "requirements" }));
-      return;
-    }
-    setLoading((l) => ({ ...l, password: true }));
+  const handleRequestPasswordReset = async () => {
+    setPasswordRequest({ loading: true, message: "", error: "" });
     try {
-      await api.put("/settings/password", {
-        current_password: passwords.current_password,
-        new_password: passwords.new_password,
+      const response = await api.post("/admin/forgot-password", { email: profile.email });
+      setPasswordRequest({
+        loading: false,
+        message: response.data.message || "A password reset link has been sent to the configured admin email.",
+        error: "",
       });
-      setPasswords({ current_password: "", new_password: "", confirm: "" });
-      setStatus((s) => ({ ...s, password: "success" }));
     } catch (err) {
-      setStatus((s) => ({ ...s, password: err.response?.data?.message || "error" }));
-    } finally {
-      setLoading((l) => ({ ...l, password: false }));
-      setTimeout(() => setStatus((s) => ({ ...s, password: "" })), 3000);
+      setPasswordRequest({
+        loading: false,
+        message: "",
+        error: err.response?.data?.message || "Unable to send the password reset email.",
+      });
     }
-  };
-
-  const passwordStatusMsg = {
-    success: { text: "✓ Password updated!", color: "text-green-500" },
-    mismatch: { text: "✗ Passwords do not match.", color: "text-red-500" },
-    requirements: { text: "Use 8–12 characters with a letter, number, and symbol. Avoid common passwords.", color: "text-red-500" },
-    "Use 8–12 characters with a letter, a number, and a symbol. Avoid common passwords.": { text: "Use 8–12 characters with a letter, number, and symbol. Avoid common passwords.", color: "text-red-500" },
-    "Current password is incorrect.": { text: "✗ Current password is incorrect.", color: "text-red-500" },
-    error: { text: "✗ Failed to update password.", color: "text-red-500" },
   };
 
   return (
@@ -196,9 +180,20 @@ export default function Settings() {
               <input
                 type={f.key === "email" ? "email" : "text"}
                 value={profile[f.key] || ""}
-                onChange={(e) => setProfile({ ...profile, [f.key]: e.target.value })}
-                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-orange-500 dark:border-white/10 dark:bg-white/5 dark:text-white"
+                onChange={f.key === "email" ? undefined : (e) => setProfile({ ...profile, [f.key]: e.target.value })}
+                readOnly={f.key === "email"}
+                aria-describedby={f.key === "email" ? "settings-admin-email-help" : undefined}
+                className={`w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-orange-500 dark:border-white/10 dark:text-white ${
+                  f.key === "email"
+                    ? "cursor-not-allowed bg-slate-100 dark:bg-white/[0.03]"
+                    : "bg-slate-50 dark:bg-white/5"
+                }`}
               />
+              {f.key === "email" && (
+                <p id="settings-admin-email-help" className="mt-1 text-xs text-slate-500">
+                  This must match the server&apos;s ADMIN_EMAIL setting.
+                </p>
+              )}
             </div>
           ))}
         </div>
@@ -221,47 +216,19 @@ export default function Settings() {
       <section className="space-y-5 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-[#111] sm:p-6">
         <div className="flex items-center gap-3 border-b border-slate-200 pb-4 dark:border-white/10">
           <div className="rounded-lg bg-orange-500/10 p-2 text-orange-600 dark:text-orange-400"><Lock size={20} /></div>
-          <div><h2 className="text-lg font-bold text-slate-900 dark:text-white">Change password</h2><p className="mt-0.5 text-xs text-slate-500">Use a unique password to keep your administrator account secure.</p></div>
+          <div><h2 className="text-lg font-bold text-slate-900 dark:text-white">Change password</h2><p className="mt-0.5 text-xs text-slate-500">We will email a secure, one-time reset link to your configured admin email.</p></div>
         </div>
-        <div className="space-y-4">
-          {[
-            { label: "Current Password", key: "current_password" },
-            { label: "New Password", key: "new_password" },
-            { label: "Confirm New Password", key: "confirm" },
-          ].map((f) => (
-            <div key={f.key}>
-              <label className="block text-sm font-medium text-slate-600 mb-1">{f.label}</label>
-              <input
-                type="password"
-                placeholder="••••••••"
-                value={passwords[f.key]}
-                minLength={f.key === "new_password" || f.key === "confirm" ? 8 : undefined}
-                maxLength={f.key === "new_password" || f.key === "confirm" ? 12 : undefined}
-                onChange={(e) => setPasswords({ ...passwords, [f.key]: e.target.value })}
-                autoComplete={f.key === "current_password" ? "current-password" : "new-password"}
-                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-orange-500 dark:border-white/10 dark:bg-white/5 dark:text-white"
-              />
-              {f.key === "new_password" && <p className="mt-1 text-xs text-slate-500">8–12 characters with a letter, number, and symbol.</p>}
-            </div>
-          ))}
-        </div>
-        <div className="flex items-center justify-between pt-2">
-          {status.password && (
-            <p role="status" className={`text-sm font-medium ${(passwordStatusMsg[status.password] || passwordStatusMsg.error).color}`}>
-              {(passwordStatusMsg[status.password] || passwordStatusMsg.error).text}
-            </p>
-          )}
-          <div className="ml-auto">
-            <button
-              onClick={handleSavePassword}
-              disabled={loading.password}
-              className="flex min-h-11 items-center gap-2 rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-bold text-white transition hover:bg-slate-700 disabled:opacity-50 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-200"
-            >
-              <Save size={16} />
-              {loading.password ? "Updating..." : "Update Password"}
-            </button>
-          </div>
-        </div>
+        {passwordRequest.message && <p role="status" className="rounded-xl border border-green-500/20 bg-green-500/10 px-4 py-3 text-sm text-green-700 dark:text-green-300">{passwordRequest.message}</p>}
+        {passwordRequest.error && <p role="alert" className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-700 dark:text-red-300">{passwordRequest.error}</p>}
+        <button
+          type="button"
+          onClick={handleRequestPasswordReset}
+          disabled={passwordRequest.loading || !profile.email}
+          className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-bold text-white transition hover:bg-slate-700 disabled:opacity-50 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-200"
+        >
+          <Lock size={16} />
+          {passwordRequest.loading ? "Sending reset link…" : "Email password reset link"}
+        </button>
       </section>
 
       {/* Notifications */}

@@ -11,6 +11,47 @@ const GOAL_ALIASES = {
   "General Fitness": ["general fitness", "fitness", "functional fitness", "group fitness", "conditioning", "hiit", "circuit training"],
 };
 
+const DAY_INDEX = {
+  Sunday: 0,
+  Monday: 1,
+  Tuesday: 2,
+  Wednesday: 3,
+  Thursday: 4,
+  Friday: 5,
+  Saturday: 6,
+};
+
+const PREFERRED_TIME_WINDOWS = {
+  Morning: [6 * 60, 12 * 60],
+  Afternoon: [12 * 60, 17 * 60],
+  Evening: [17 * 60, 22 * 60],
+  Flexible: [6 * 60, 22 * 60],
+};
+
+function timeToMinutes(value) {
+  if (typeof value !== "string" || !/^([01]\d|2[0-3]):[0-5]\d$/.test(value)) return null;
+  const [hours, minutes] = value.split(":").map(Number);
+  return hours * 60 + minutes;
+}
+
+function isAvailableForMember(trainer, preferences) {
+  const window = PREFERRED_TIME_WINDOWS[preferences.preferredWorkoutTime];
+  if (!window || !preferences.days?.length || !Array.isArray(trainer.availability)) return false;
+
+  return preferences.days.every((day) => {
+    const dayOfWeek = DAY_INDEX[day];
+    return trainer.availability.some((slot) => {
+      const start = timeToMinutes(slot.start_time);
+      const end = timeToMinutes(slot.end_time);
+      return Number(slot.day_of_week) === dayOfWeek &&
+        start !== null &&
+        end !== null &&
+        start < window[1] &&
+        window[0] < end;
+    });
+  });
+}
+
 function scoreTrainer(t, goal) {
   const text = `${(t.specializations || []).join(" ")} ${t.bio || ""} ${t.goal_specialty || ""}`.toLowerCase();
   return (t.goal_specialty === goal ? 100 : 0) +
@@ -169,11 +210,14 @@ export default function CoachSelect() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [profile, setProfile] = useState(null);
+  const [availability, setAvailability] = useState({});
 
   useEffect(() => {
     const goalData = JSON.parse(sessionStorage.getItem("avefit_goal") || "{}");
+    const availabilityData = JSON.parse(sessionStorage.getItem("avefit_availability") || "{}");
     const savedCoach = JSON.parse(sessionStorage.getItem("avefit_trainer") || "null");
     setGoal(goalData.goal || "General Fitness");
+    setAvailability(availabilityData);
     if (savedCoach?.trainer_id) setSelectedId(savedCoach.trainer_id);
 
     userApi.get("/trainers")
@@ -183,8 +227,10 @@ export default function CoachSelect() {
   }, []);
 
   const ranked = useMemo(
-    () => [...trainers].sort((a, b) => scoreTrainer(b, goal) - scoreTrainer(a, goal)),
-    [trainers, goal]
+    () => trainers
+      .filter((trainer) => isAvailableForMember(trainer, availability))
+      .sort((a, b) => scoreTrainer(b, goal) - scoreTrainer(a, goal)),
+    [trainers, goal, availability]
   );
 
   const recommended = ranked[0];
@@ -197,8 +243,8 @@ export default function CoachSelect() {
   };
 
   const handleContinue = () => {
-    if (!selectedId) {
-      setError("Please select a coach before continuing.");
+    if (!ranked.some((trainer) => trainer.trainer_id === selectedId)) {
+      setError("Please select a coach who matches your workout days and preferred time.");
       return;
     }
     navigate("/user/confirm");
@@ -214,7 +260,7 @@ export default function CoachSelect() {
         <div className="mb-6">
           <h2 className="text-3xl font-bold text-slate-900 dark:text-white">Choose Your Coach</h2>
           <p className="text-slate-500 dark:text-slate-400 text-sm mt-2 leading-6">
-            Based on your <b className="text-slate-700 dark:text-slate-200">{goal}</b> goal, we've found the coach who best matches your needs. You can choose any available coach.
+            Coaches shown match your selected workout days and preferred time, as well as your <b className="text-slate-700 dark:text-slate-200">{goal}</b> goal.
           </p>
         </div>
 
@@ -223,9 +269,21 @@ export default function CoachSelect() {
             <div className="h-[430px] bg-slate-100 dark:bg-slate-900 rounded-2xl animate-pulse" />
             <div className="h-7 w-40 bg-slate-100 dark:bg-slate-900 rounded animate-pulse" />
           </div>
-        ) : !recommended ? (
+        ) : trainers.length === 0 ? (
           <div className="text-center py-16 text-slate-500 text-sm">
             No active coach profiles are available.
+          </div>
+        ) : !recommended ? (
+          <div className="text-center py-10 text-slate-500 text-sm">
+            <p className="font-semibold text-slate-700 dark:text-slate-200">No coaches match your availability.</p>
+            <p className="mt-2">Choose a coach available on every selected workout day during your preferred time.</p>
+            <button
+              type="button"
+              onClick={() => navigate("/user/availability")}
+              className="mt-4 rounded-xl border border-orange-500 px-4 py-2 font-semibold text-orange-600 hover:bg-orange-50 dark:text-orange-400 dark:hover:bg-orange-500/10"
+            >
+              Update availability
+            </button>
           </div>
         ) : (
           <>

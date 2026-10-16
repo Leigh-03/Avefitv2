@@ -108,7 +108,8 @@ export default function BrowserPushSettings({ audience }) {
               state === "denied" ? "Permission is blocked. Change it in your browser site settings." :
                 state === "unsupported" ? "This browser does not support push notifications." :
                   state === "checking" ? "Checking this browser…" :
-                    "Get alerts even when AveFit is not open."}
+                    state === "error" ? "Browser push is unavailable until server setup is complete. In-app notifications still work." :
+                      "Get alerts even when AveFit is not open."}
           </p>
           {error && <p role="alert" className="mt-2 text-xs text-red-600 dark:text-red-400">{error}</p>}
         </div>

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Search, CheckCircle, XCircle, Trash2, X, UserRoundCog, UserRound, Save } from "lucide-react";
 import api from "../services/api";
+import ConfirmDialog from "../components/ui/ConfirmDialog";
 
 const statusColors = {
   Active: "bg-green-100 text-green-700 dark:bg-green-500/15 dark:text-green-400",
@@ -70,7 +71,7 @@ function MemberPhoto({ member, large = false }) {
 }
 
 function MemberModal({ member, onClose, onSave }) {
-  const [form, setForm] = useState(member || { full_name: "", email: "", phone: "", gender: "", age: "", height: "", weight: "", fitness_goal: "" });
+  const [form, setForm] = useState(member || { full_name: "", email: "", phone: "", gender: "", age: "", height: "", weight: "", fitness_goal: "", preferred_workout_time: "" });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   // Active/Inactive are the admin-selectable statuses; keep the member's current
@@ -104,6 +105,7 @@ function MemberModal({ member, onClose, onSave }) {
               {label:"Full Name *",key:"full_name",type:"text",span:true}, {label:"Email *",key:"email",type:"email",span:true},
               {label:"Phone",key:"phone",type:"text"}, {label:"Gender",key:"gender",type:"select",options:["","Male","Female"]},
               {label:"Age",key:"age",type:"number"}, {label:"Fitness Goal",key:"fitness_goal",type:"select",options:["","Weight Loss","Muscle Gain","General Fitness","Endurance"]},
+              {label:"Preferred Workout Time",key:"preferred_workout_time",type:"select",options:["","Morning","Afternoon","Evening","Flexible"]},
               {label:"Height (cm)",key:"height",type:"number"}, {label:"Weight (kg)",key:"weight",type:"number"},
             ].map(f => <div key={f.key} className={f.span ? "col-span-2" : ""}>
               <label className="block text-sm font-medium text-slate-600 dark:text-gray-300 mb-1">{f.label}</label>
@@ -191,7 +193,7 @@ function ViewModal({ member, trainers, onClose, onEdit, onAssign, onMembershipUp
 
         <div className="p-6 space-y-5">
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
-            {[{label:"Email",value:member.email},{label:"Email Verified",value:member.email_verified?"Yes":"No"},{label:"Phone",value:member.phone},{label:"Gender",value:member.gender},{label:"Age",value:member.age?`${member.age} yrs`:"—"},{label:"Height",value:member.height?`${member.height} cm`:"—"},{label:"Weight",value:member.weight?`${member.weight} kg`:"—"},{label:"Fitness Goal",value:member.fitness_goal},{label:"Status",value:member.status}].map(x=><div key={x.label} className="bg-slate-50 dark:bg-[#222] rounded-xl p-3"><p className="text-xs text-slate-400">{x.label}</p><p className="mt-1 font-semibold text-slate-700 dark:text-gray-200 break-words">{x.value || "—"}</p></div>)}
+            {[{label:"Email",value:member.email},{label:"Email Verified",value:member.email_verified?"Yes":"No"},{label:"Phone",value:member.phone},{label:"Gender",value:member.gender},{label:"Age",value:member.age?`${member.age} yrs`:"—"},{label:"Height",value:member.height?`${member.height} cm`:"—"},{label:"Weight",value:member.weight?`${member.weight} kg`:"—"},{label:"Fitness Goal",value:member.fitness_goal},{label:"Preferred Workout Time",value:member.preferred_workout_time},{label:"Status",value:member.status}].map(x=><div key={x.label} className="bg-slate-50 dark:bg-[#222] rounded-xl p-3"><p className="text-xs text-slate-400">{x.label}</p><p className="mt-1 font-semibold text-slate-700 dark:text-gray-200 break-words">{x.value || "—"}</p></div>)}
           </div>
 
           <div className="rounded-2xl border border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-900 p-4 text-center">
@@ -272,6 +274,9 @@ function ViewModal({ member, trainers, onClose, onEdit, onAssign, onMembershipUp
 
 export default function Members() {
   const [members,setMembers]=useState([]), [trainers,setTrainers]=useState([]), [loading,setLoading]=useState(true), [fetchError,setFetchError]=useState(""), [search,setSearch]=useState(""), [filter,setFilter]=useState("All"), [showAddModal,setShowAddModal]=useState(false), [viewMember,setViewMember]=useState(null), [editMember,setEditMember]=useState(null);
+  const [confirmMember, setConfirmMember] = useState(null);
+  const [deletingMember, setDeletingMember] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
 
   const fetchData = async () => {
     setLoading(true); setFetchError("");
@@ -295,7 +300,26 @@ export default function Members() {
 
   const handleApprove=async id=>{try{await api.put(`/members/${id}/approve`);await fetchData();}catch(e){alert(e.response?.data?.message||"Failed to update member status.");}};
   const handleReject=async id=>{try{await api.put(`/members/${id}/reject`);await fetchData();}catch(e){alert(e.response?.data?.message||"Failed to deactivate member.");}};
-  const handleDelete=async id=>{if(!window.confirm("Delete this member permanently?"))return;try{await api.delete(`/members/${id}`);await fetchData();}catch(e){alert(e.response?.data?.message||"Failed to delete member.");}};
+  const handleDelete=(id)=>{
+    const member = members.find((row) => Number(row.member_id) === Number(id));
+    if (member) setConfirmMember(member);
+    setDeleteError("");
+  };
+  const confirmDelete=async()=>{
+    if (!confirmMember) return;
+    setDeletingMember(true);
+    setDeleteError("");
+    try {
+      await api.delete(`/members/${confirmMember.member_id}`);
+      setConfirmMember(null);
+      setViewMember((current) => current && Number(current.member_id) === Number(confirmMember.member_id) ? null : current);
+      await fetchData();
+    } catch (error) {
+      setDeleteError(error.response?.data?.message || "Failed to delete this member. Please try again.");
+    } finally {
+      setDeletingMember(false);
+    }
+  };
   const handleAssign=async(member,trainer_id)=>{
     await api.put(`/members/${member.member_id}/trainer`,{trainer_id});
     await fetchData();
@@ -368,6 +392,7 @@ export default function Members() {
     {showAddModal&&<MemberModal onClose={()=>setShowAddModal(false)} onSave={handleMemberSave}/>} 
     {editMember&&<MemberModal member={editMember} onClose={()=>setEditMember(null)} onSave={handleMemberSave}/>} 
     {viewMember&&<ViewModal member={viewMember} trainers={trainers} onClose={()=>setViewMember(null)} onEdit={m=>setEditMember(m)} onAssign={handleAssign} onMembershipUpdate={handleMembershipUpdate}/>}
+    {confirmMember&&<ConfirmDialog title={`Delete ${confirmMember.full_name || "this member"} permanently?`} description="This action cannot be undone. The member’s account and associated records will be permanently deleted." confirmLabel="Delete member" isLoading={deletingMember} error={deleteError} onCancel={()=>{if(!deletingMember){setConfirmMember(null);setDeleteError("");}}} onConfirm={confirmDelete}/>}
 
     <header className="ave-page-hero rounded-3xl border border-orange-100 px-5 py-6 dark:border-white/5 sm:px-7 sm:py-8"><p className="text-xs font-bold uppercase tracking-[0.16em] text-orange-600 dark:text-orange-400">People management</p><div className="mt-2 flex flex-wrap items-end justify-between gap-4"><div><h1 className="text-3xl font-black text-slate-900 dark:text-white">Members</h1><p className="mt-1 text-sm text-slate-600 dark:text-slate-400">Manage accounts, approvals, fitness profiles, and coach assignments.</p></div></div></header>
     {fetchError&&<div role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300">⚠️ {fetchError}</div>}
