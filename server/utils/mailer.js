@@ -1,7 +1,9 @@
 const nodemailer = require("nodemailer");
 const dns = require("dns");
+const path = require("path");
+const { VERIFICATION_CODE_TTL_MINUTES } = require("./emailVerification");
 
-require("dotenv").config();
+require("dotenv").config({ path: path.join(__dirname, "..", ".env") });
 
 const BRAND_COLOR = "#f97316";
 
@@ -20,6 +22,9 @@ function smtpConfig() {
   return {
     host,
     port: Number(process.env.SMTP_PORT || 465),
+    connectionTimeout: 10000,
+    greetingTimeout: 10000,
+    socketTimeout: 15000,
 
     // Force IPv4 because some hosted environments
     // may have unreliable IPv6 connectivity.
@@ -102,8 +107,12 @@ async function sendMail({ to, subject, text, html }) {
     html,
   });
 
+  if (!info.accepted?.length) {
+    throw new Error("SMTP server did not accept the email recipient.");
+  }
+
   console.log(
-    "📧 Verification email sent to " +
+    "📧 Email sent to " +
       to +
       " (" +
       info.messageId +
@@ -206,8 +215,147 @@ async function sendVerificationEmail({ to, firstName, code }) {
   });
 }
 
+async function sendWorkoutPlanReadyEmail({ to, firstName }) {
+  const name = escapeHtml(firstName || "there");
+  const workoutUrl = `${(process.env.CLIENT_URL || "http://localhost:5173").replace(/\/+$/, "")}/user/workout`;
+  const text = [
+    `Hi ${firstName || "there"},`,
+    "",
+    "Your Workout Plan is ready. Check your AveFit Page to see your Workout Plan.",
+    "",
+    `View your workout plan: ${workoutUrl}`,
+    "",
+    "Avenue Power & Fitness Gym",
+  ].join("\n");
+  const html = `<!doctype html>
+<html lang="en">
+  <body style="margin:0;padding:24px;background:#f8fafc;font-family:Segoe UI,Helvetica,Arial,sans-serif;color:#0f172a;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;margin:0 auto;background:#ffffff;border-radius:16px;border:1px solid #e2e8f0;overflow:hidden;">
+      <tr>
+        <td style="background:${BRAND_COLOR};padding:22px 28px;">
+          <span style="font-size:20px;font-weight:800;color:#ffffff;">AveFit</span>
+          <span style="display:block;font-size:12px;color:#ffedd5;margin-top:2px;">Avenue Power &amp; Fitness Gym</span>
+        </td>
+      </tr>
+      <tr>
+        <td style="padding:28px;">
+          <p style="margin:0 0 16px;font-size:16px;">Hi ${name},</p>
+          <p style="margin:0 0 20px;font-size:16px;line-height:1.6;">Your Workout Plan is ready. Check your AveFit Page to see your Workout Plan.</p>
+          <p style="margin:0 0 20px;">
+            <a href="${workoutUrl}" style="display:inline-block;background:${BRAND_COLOR};color:#fff;text-decoration:none;padding:12px 18px;border-radius:10px;font-weight:700;">View my workout plan</a>
+          </p>
+          <p style="margin:0;font-size:12px;color:#94a3b8;">Avenue Power &amp; Fitness Gym</p>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>`;
+
+  return sendMail({
+    to,
+    subject: "Your Workout Plan is ready",
+    text,
+    html,
+  });
+}
+
+async function sendPasswordChangeVerificationEmail({ to, firstName, code }) {
+  const name = escapeHtml(firstName || "there");
+  const safeCode = escapeHtml(code);
+  const text = [
+    `Hi ${firstName || "there"},`,
+    "",
+    "Use this code to change your AveFit account password:",
+    "",
+    code,
+    "",
+    `This code expires in ${VERIFICATION_CODE_TTL_MINUTES} minutes and can only be used once.`,
+    "If you did not request a password change, you can ignore this email.",
+    "",
+    "Avenue Power & Fitness Gym",
+  ].join("\n");
+  const html = `<!doctype html>
+<html lang="en">
+  <body style="margin:0;padding:24px;background:#f8fafc;font-family:Segoe UI,Helvetica,Arial,sans-serif;color:#0f172a;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;margin:0 auto;background:#ffffff;border-radius:16px;border:1px solid #e2e8f0;overflow:hidden;">
+      <tr>
+        <td style="background:${BRAND_COLOR};padding:22px 28px;">
+          <span style="font-size:20px;font-weight:800;color:#ffffff;">AveFit</span>
+          <span style="display:block;font-size:12px;color:#ffedd5;margin-top:2px;">Avenue Power &amp; Fitness Gym</span>
+        </td>
+      </tr>
+      <tr>
+        <td style="padding:28px;">
+          <p style="margin:0 0 16px;font-size:16px;">Hi ${name},</p>
+          <p style="margin:0 0 20px;font-size:14px;line-height:1.6;">Use this verification code to change your AveFit account password:</p>
+          <p style="margin:0 0 24px;text-align:center;background:#fff7ed;border:1px solid #fed7aa;border-radius:12px;padding:16px;font-size:28px;font-weight:800;letter-spacing:6px;color:${BRAND_COLOR};">${safeCode}</p>
+          <p style="margin:0;font-size:12px;line-height:1.6;color:#94a3b8;">This code expires in ${VERIFICATION_CODE_TTL_MINUTES} minutes and can only be used once. If you did not request a password change, you can ignore this email.</p>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>`;
+
+  return sendMail({
+    to,
+    subject: "Verify your AveFit password change",
+    text,
+    html,
+  });
+}
+
+async function sendAdminPasswordResetEmail({ to, firstName, token, expiresInMinutes }) {
+  const name = escapeHtml(firstName || "there");
+  const resetUrl = `${(process.env.CLIENT_URL || "http://localhost:5173").replace(/\/+$/, "")}/admin/reset-password?token=${encodeURIComponent(token)}`;
+  const safeResetUrl = escapeHtml(resetUrl);
+  const text = [
+    `Hi ${firstName || "there"},`,
+    "",
+    "A password reset was requested for your AveFit administrator account.",
+    "Use this secure, one-time link to choose a new password:",
+    resetUrl,
+    "",
+    `This link expires in ${expiresInMinutes} minutes. If you did not request this change, you can ignore this email.`,
+    "",
+    "Avenue Power & Fitness Gym",
+  ].join("\n");
+  const html = `<!doctype html>
+<html lang="en">
+  <body style="margin:0;padding:24px;background:#f8fafc;font-family:Segoe UI,Helvetica,Arial,sans-serif;color:#0f172a;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;margin:0 auto;background:#ffffff;border-radius:16px;border:1px solid #e2e8f0;overflow:hidden;">
+      <tr>
+        <td style="background:${BRAND_COLOR};padding:22px 28px;">
+          <span style="font-size:20px;font-weight:800;color:#ffffff;">AveFit</span>
+          <span style="display:block;font-size:12px;color:#ffedd5;margin-top:2px;">Avenue Power &amp; Fitness Gym</span>
+        </td>
+      </tr>
+      <tr>
+        <td style="padding:28px;">
+          <p style="margin:0 0 16px;font-size:16px;">Hi ${name},</p>
+          <p style="margin:0 0 20px;font-size:14px;line-height:1.6;">A password reset was requested for your administrator account.</p>
+          <p style="margin:0 0 24px;">
+            <a href="${safeResetUrl}" style="display:inline-block;background:${BRAND_COLOR};color:#fff;text-decoration:none;padding:12px 18px;border-radius:10px;font-weight:700;">Reset admin password</a>
+          </p>
+          <p style="margin:0;font-size:12px;line-height:1.6;color:#94a3b8;">This one-time link expires in ${expiresInMinutes} minutes. If you did not request this change, ignore this email.</p>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>`;
+
+  return sendMail({
+    to,
+    subject: "Reset your AveFit admin password",
+    text,
+    html,
+  });
+}
+
 module.exports = {
   isMailConfigured,
   sendMail,
   sendVerificationEmail,
+  sendWorkoutPlanReadyEmail,
+  sendPasswordChangeVerificationEmail,
+  sendAdminPasswordResetEmail,
 };

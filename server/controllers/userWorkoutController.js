@@ -1,6 +1,24 @@
 const pool = require("../db");
 const { createNotification } = require("../utils/notifications");
 
+const SCHEDULED_FOR_TODAY_SQL = `(
+  (
+    ws.session_date ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+    AND ws.session_date = TO_CHAR(NOW() AT TIME ZONE 'Asia/Manila', 'YYYY-MM-DD')
+  )
+  OR (
+    ws.session_date !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+    AND LOWER(BTRIM(ws.session_date)) = LOWER(TO_CHAR(NOW() AT TIME ZONE 'Asia/Manila', 'FMDay'))
+  )
+)`;
+
+const getOwnedSessionSchedule = async (sessionId, userId) => pool.query(`
+  SELECT ws.session_id, ws.session_date, ${SCHEDULED_FOR_TODAY_SQL} AS scheduled_today
+  FROM workout_sessions ws
+  JOIN workout_plans wp ON ws.workout_plan_id = wp.workout_plan_id
+  WHERE ws.session_id = $1 AND wp.user_id = $2
+`, [sessionId, userId]);
+
 // GET user's workout plan
 const getUserWorkoutPlan = async (req, res) => {
   try {
@@ -66,6 +84,19 @@ const updateWorkoutSession = async (req, res) => {
   try {
     const { id } = req.params;
     const { sets, reps, duration_minutes, completed } = req.body;
+    if (completed === true) {
+      const scheduledSession = await getOwnedSessionSchedule(id, req.user.user_id);
+      if (!scheduledSession.rowCount) {
+        return res.status(404).json({ success: false, message: "Workout not found." });
+      }
+      if (!scheduledSession.rows[0].scheduled_today) {
+        return res.status(400).json({
+          success: false,
+          message: "You can only complete this workout on its scheduled day.",
+        });
+      }
+    }
+
     const result = await pool.query(`
       UPDATE workout_sessions ws
       SET sets=$1, reps=$2, duration_minutes=$3, completed=$4
@@ -73,6 +104,7 @@ const updateWorkoutSession = async (req, res) => {
       WHERE ws.session_id=$5
         AND ws.workout_plan_id = wp.workout_plan_id
         AND wp.user_id = $6
+        AND ($4 IS NOT TRUE OR (ws.started_at IS NOT NULL AND ${SCHEDULED_FOR_TODAY_SQL}))
       RETURNING ws.session_id
     `, [sets, reps, duration_minutes, completed || false, id, req.user.user_id]);
 
@@ -90,6 +122,17 @@ const updateWorkoutSession = async (req, res) => {
 // PUT record the member's workout start/check-in time.
 const startWorkoutSession = async (req, res) => {
   try {
+    const scheduledSession = await getOwnedSessionSchedule(req.params.id, req.user.user_id);
+    if (!scheduledSession.rowCount) {
+      return res.status(404).json({ success: false, message: "Workout not found." });
+    }
+    if (!scheduledSession.rows[0].scheduled_today) {
+      return res.status(400).json({
+        success: false,
+        message: "You can only start this workout on its scheduled day.",
+      });
+    }
+
     const result = await pool.query(`
       UPDATE workout_sessions ws
       SET started_at = COALESCE(ws.started_at, NOW())
@@ -98,11 +141,12 @@ const startWorkoutSession = async (req, res) => {
         AND ws.workout_plan_id = wp.workout_plan_id
         AND wp.user_id = $2
         AND ws.completed = false
+        AND ${SCHEDULED_FOR_TODAY_SQL}
       RETURNING ws.session_id, ws.started_at
     `, [req.params.id, req.user.user_id]);
 
     if (result.rowCount === 0) {
-      return res.status(404).json({ success: false, message: "Workout not found or already completed." });
+      return res.status(400).json({ success: false, message: "This workout can only be started on its scheduled day." });
     }
 
     res.json({ success: true, data: result.rows[0] });
@@ -115,6 +159,17 @@ const startWorkoutSession = async (req, res) => {
 // PUT mark session as complete
 const completeSession = async (req, res) => {
   try {
+    const scheduledSession = await getOwnedSessionSchedule(req.params.id, req.user.user_id);
+    if (!scheduledSession.rowCount) {
+      return res.status(404).json({ success: false, message: "Workout not found." });
+    }
+    if (!scheduledSession.rows[0].scheduled_today) {
+      return res.status(400).json({
+        success: false,
+        message: "You can only complete this workout on its scheduled day.",
+      });
+    }
+
     const result = await pool.query(`
       UPDATE workout_sessions ws
       SET completed = true, completed_at = NOW()
@@ -124,11 +179,12 @@ const completeSession = async (req, res) => {
         AND wp.user_id = $2
         AND ws.started_at IS NOT NULL
         AND ws.completed = false
+        AND ${SCHEDULED_FOR_TODAY_SQL}
       RETURNING ws.session_id, ws.workout_plan_id
     `, [req.params.id, req.user.user_id]);
 
     if (result.rowCount === 0) {
-      return res.status(404).json({ success: false, message: "Workout not found, not started, or already completed." });
+      return res.status(400).json({ success: false, message: "This workout cannot be completed. Start it on its scheduled day first." });
     }
 
     let workout;

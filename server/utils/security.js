@@ -33,6 +33,11 @@ function validatePhone(value) {
   return digits.length >= 10 && digits.length <= 15;
 }
 
+function validateAge(value) {
+  const age = typeof value === 'number' ? value : Number(value);
+  return Number.isInteger(age) && age >= 12 && age <= 90;
+}
+
 function validateRegistration({ first_name, last_name, email, password, phone }) {
   if (!validateName(first_name) || !validateName(last_name)) {
     return 'First and last name must be 2-50 characters and contain letters, spaces, apostrophes, or hyphens.';
@@ -90,5 +95,5 @@ function publicUser(row) {
 
 module.exports = {
   normalizeEmail, validateEmail, validatePassword, validateName, validatePhone,
-  validateRegistration, validateImageDataUrl, publicUser,
+  validateAge, validateRegistration, validateImageDataUrl, publicUser,
 };

@@ -6,7 +6,7 @@ const getPublicKey = (req, res) => {
   if (!publicKey) {
     return res.status(503).json({
       success: false,
-      message: "Browser push notifications are not configured on the server.",
+      message: "Browser push is unavailable. Configure WEB_PUSH_VAPID_PUBLIC_KEY and WEB_PUSH_VAPID_PRIVATE_KEY in the server environment, then restart the API.",
     });
   }
   res.json({ success: true, publicKey });
@@ -98,7 +98,7 @@ const saveSubscription = async (req, res) => {
   if (!getVapidPublicKey()) {
     return res.status(503).json({
       success: false,
-      message: "Browser push notifications are not configured on the server.",
+      message: "Browser push is unavailable. Configure WEB_PUSH_VAPID_PUBLIC_KEY and WEB_PUSH_VAPID_PRIVATE_KEY in the server environment, then restart the API.",
     });
   }
 

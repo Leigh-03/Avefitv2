@@ -1,0 +1,6 @@
+BEGIN;
+
+ALTER TABLE users
+  ADD COLUMN IF NOT EXISTS preferred_workout_time VARCHAR(20);
+
+COMMIT;

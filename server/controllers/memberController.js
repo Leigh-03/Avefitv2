@@ -1,5 +1,6 @@
 const pool = require("../db");
 const { createNotification } = require("../utils/notifications");
+const { validateAge } = require("../utils/security");
 
 // =====================================================
 // GET ALL MEMBERS FROM USERS TABLE
@@ -38,6 +39,7 @@ const getMembers = async (req, res) => {
     u.workout_days_per_week,
     u.workout_duration,
     u.preferred_days,
+    u.preferred_workout_time,
     u.intensity,
     u.injuries,
     u.health_conditions,
@@ -130,6 +132,7 @@ const getMemberById = async (req, res) => {
         u.workout_days_per_week,
         u.workout_duration,
         u.preferred_days,
+        u.preferred_workout_time,
         u.intensity,
         u.injuries,
         u.health_conditions,
@@ -371,8 +374,28 @@ const updateMember = async (req, res) => {
       fitness_goal,
       activity_level,
       target_weight,
+      preferred_workout_time,
       status
     } = req.body;
+
+    if (
+      preferred_workout_time !== undefined &&
+      preferred_workout_time !== null &&
+      preferred_workout_time !== "" &&
+      !["Morning", "Afternoon", "Evening", "Flexible"].includes(preferred_workout_time)
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Choose Morning, Afternoon, Evening, or Flexible as the preferred workout time.",
+      });
+    }
+
+    if (age !== undefined && age !== null && age !== "" && !validateAge(age)) {
+      return res.status(400).json({
+        success: false,
+        message: "Age must be a whole number between 12 and 90.",
+      });
+    }
 
     // Whitelist the approval statuses the admin is allowed to assign here.
     const normalizedStatus =
@@ -399,9 +422,10 @@ const updateMember = async (req, res) => {
         fitness_goal = COALESCE($10, fitness_goal),
         activity_level = COALESCE($11, activity_level),
         target_weight = COALESCE($12, target_weight),
-        account_status = COALESCE($13, account_status),
+        preferred_workout_time = COALESCE($13, preferred_workout_time),
+        account_status = COALESCE($14, account_status),
         updated_at = CURRENT_TIMESTAMP
-      WHERE user_id = $14
+      WHERE user_id = $15
       RETURNING *
       `,
       [
@@ -417,6 +441,7 @@ const updateMember = async (req, res) => {
         fitness_goal,
         activity_level,
         target_weight,
+        preferred_workout_time,
         normalizedStatus,
         id
       ]
