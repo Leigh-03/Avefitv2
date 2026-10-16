@@ -40,6 +40,22 @@ const adminLoginLimiter = rateLimit({
   message: 'Too many admin login attempts. Please try again in a few minutes.',
 });
 
+const adminPasswordResetRequestLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 4,
+  keyPrefix: 'admin-password-reset',
+  message: 'Too many admin password reset requests. Please try again later.',
+  resetOnSuccess: false,
+});
+
+const adminPasswordResetAttemptLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 8,
+  keyPrefix: 'admin-password-reset-attempt',
+  message: 'Too many admin password reset attempts. Please wait before trying again.',
+  resetOnSuccess: false,
+});
+
 const userLoginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 8,
@@ -76,6 +92,8 @@ const verificationAttemptLimiter = rateLimit({
 
 module.exports = {
   adminLoginLimiter,
+  adminPasswordResetRequestLimiter,
+  adminPasswordResetAttemptLimiter,
   userLoginLimiter,
   signupLimiter,
   verificationResendLimiter,

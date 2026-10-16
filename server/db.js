@@ -1,13 +1,75 @@
 const { Pool } = require("pg");
-require("dotenv").config();
+const path = require("path");
+require("dotenv").config({ path: path.join(__dirname, ".env") });
 
-const pool = new Pool({
-  host: process.env.DB_HOST,
-  port: process.env.DB_PORT,
-  database: process.env.DB_NAME,
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
-});
+const getDatabaseConfig = () => {
+  const connectionString = process.env.DATABASE_URL?.trim();
+  let host = process.env.DB_HOST?.trim();
+
+  if (connectionString) {
+    let parsed;
+    try {
+      parsed = new URL(connectionString);
+    } catch {
+      throw new Error("DATABASE_URL must be a valid PostgreSQL connection URL.");
+    }
+    if (!["postgres:", "postgresql:"].includes(parsed.protocol)) {
+      throw new Error("DATABASE_URL must use the postgres:// or postgresql:// protocol.");
+    }
+    host = parsed.hostname;
+  }
+
+  if (!connectionString) {
+    const missing = ["DB_HOST", "DB_NAME", "DB_USER"]
+      .filter((key) => !process.env[key]?.trim());
+    if (missing.length) {
+      throw new Error(
+        `Missing PostgreSQL configuration: set DATABASE_URL or ${missing.join(", ")}.`
+      );
+    }
+  }
+
+  const portValue = process.env.DB_PORT?.trim();
+  const port = portValue ? Number(portValue) : undefined;
+  if (portValue && (!Number.isInteger(port) || port < 1 || port > 65535)) {
+    throw new Error("DB_PORT must be a valid port number between 1 and 65535.");
+  }
+
+  const sslSetting = process.env.DB_SSL?.trim().toLowerCase();
+  let sslEnabled;
+  if (sslSetting) {
+    if (["true", "1", "require"].includes(sslSetting)) {
+      sslEnabled = true;
+    } else if (["false", "0", "disable"].includes(sslSetting)) {
+      sslEnabled = false;
+    } else {
+      throw new Error("DB_SSL must be true, false, require, or disable.");
+    }
+  } else {
+    const normalizedHost = (host || "").toLowerCase();
+    const isLocalHost =
+      normalizedHost === "localhost" ||
+      normalizedHost === "::1" ||
+      normalizedHost.startsWith("127.");
+    sslEnabled = Boolean(host) && !isLocalHost;
+  }
+
+  return {
+    ...(connectionString
+      ? { connectionString }
+      : {
+          host,
+          port,
+          database: process.env.DB_NAME,
+          user: process.env.DB_USER,
+          password: process.env.DB_PASSWORD,
+        }),
+    ssl: sslEnabled ? {} : false,
+    connectionTimeoutMillis: 10000,
+  };
+};
+
+const pool = new Pool(getDatabaseConfig());
 
 const expireMemberships = async (userId = null) => {
   const result = await pool.query(`
@@ -60,9 +122,27 @@ const initializeDatabase = async () => {
         day_of_week SMALLINT NOT NULL CHECK (day_of_week BETWEEN 0 AND 6),
         start_time TIME NOT NULL,
         end_time TIME NOT NULL,
+        CHECK (start_time >= TIME '06:00' AND end_time <= TIME '22:00'),
         CHECK (start_time < end_time),
         UNIQUE (trainer_id, day_of_week, start_time, end_time)
       )
+    `);
+    await client.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1
+          FROM pg_constraint
+          WHERE conrelid = 'trainer_availability'::regclass
+            AND conname = 'trainer_availability_business_hours_check'
+        ) THEN
+          ALTER TABLE trainer_availability
+          ADD CONSTRAINT trainer_availability_business_hours_check
+          CHECK (start_time >= TIME '06:00' AND end_time <= TIME '22:00')
+          NOT VALID;
+        END IF;
+      END
+      $$
     `);
     await client.query(`
       CREATE INDEX IF NOT EXISTS trainer_availability_trainer_day_idx
@@ -123,6 +203,36 @@ const initializeDatabase = async () => {
     await client.query(`
       ALTER TABLE users
       ADD COLUMN IF NOT EXISTS account_status VARCHAR(20) DEFAULT 'Pending'
+    `);
+
+    await client.query(`
+      ALTER TABLE users
+      ADD COLUMN IF NOT EXISTS preferred_workout_time VARCHAR(20)
+    `);
+
+    await client.query(`
+      ALTER TABLE members
+      ADD COLUMN IF NOT EXISTS trainer_id INTEGER
+    `);
+
+    await client.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1
+          FROM information_schema.table_constraints
+          WHERE constraint_schema = current_schema()
+            AND table_name = 'members'
+            AND constraint_name = 'members_trainer_id_fkey'
+        ) THEN
+          ALTER TABLE members
+          ADD CONSTRAINT members_trainer_id_fkey
+          FOREIGN KEY (trainer_id)
+          REFERENCES trainers(trainer_id)
+          ON DELETE SET NULL;
+        END IF;
+      END
+      $$
     `);
 
     await client.query(`
@@ -213,6 +323,21 @@ const initializeDatabase = async () => {
     `);
 
     await client.query(`
+      ALTER TABLE users
+      ADD COLUMN IF NOT EXISTS password_change_code_hash TEXT
+    `);
+
+    await client.query(`
+      ALTER TABLE users
+      ADD COLUMN IF NOT EXISTS password_change_code_expires_at TIMESTAMP
+    `);
+
+    await client.query(`
+      ALTER TABLE users
+      ADD COLUMN IF NOT EXISTS password_change_code_sent_at TIMESTAMP
+    `);
+
+    await client.query(`
       CREATE INDEX IF NOT EXISTS users_verification_token_idx
       ON users (verification_token_hash)
       WHERE verification_token_hash IS NOT NULL
@@ -250,6 +375,16 @@ const initializeDatabase = async () => {
     await client.query(`
       ALTER TABLE admins
       ADD COLUMN IF NOT EXISTS token_version INTEGER NOT NULL DEFAULT 0
+    `);
+
+    await client.query(`
+      ALTER TABLE admins
+      ADD COLUMN IF NOT EXISTS password_reset_token_hash TEXT
+    `);
+
+    await client.query(`
+      ALTER TABLE admins
+      ADD COLUMN IF NOT EXISTS password_reset_expires_at TIMESTAMPTZ
     `);
 
     await client.query(`

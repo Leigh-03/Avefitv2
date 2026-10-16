@@ -3,6 +3,7 @@ const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const loadExerciseCatalog = require("../utils/exerciseCatalog");
 const { createNotification } = require("../utils/notifications");
+const { sendWorkoutPlanReadyEmail } = require("../utils/mailer");
 
 const {
   validateEmail,
@@ -825,6 +826,7 @@ const getTrainerRoster = async (req, res) => {
         u.injuries,
         u.health_conditions,
         u.preferred_days,
+        u.preferred_workout_time,
         u.workout_days_per_week,
         u.workout_duration,
         pl.weight AS latest_weight,
@@ -1026,6 +1028,7 @@ const getMyRoster = async (req, res) => {
         u.injuries,
         u.health_conditions,
         u.preferred_days,
+        u.preferred_workout_time,
         u.workout_days_per_week,
         u.workout_duration,
         pl.weight AS latest_weight,
@@ -1206,7 +1209,7 @@ const createMyWorkoutPlan = async (req, res) => {
 
     const member = await client.query(
       `
-      SELECT user_id, preferred_days
+      SELECT user_id, first_name, email, preferred_days
       FROM users
       WHERE user_id = $1
         AND trainer_id = $2
@@ -1283,6 +1286,20 @@ const createMyWorkoutPlan = async (req, res) => {
       targetUrl: "/user/workout",
     }).catch((err) => {
       console.error("Workout plan notification failed:", err.message);
+    });
+    sendWorkoutPlanReadyEmail({
+      to: member.rows[0].email,
+      firstName: member.rows[0].first_name,
+    }).then((result) => {
+      if (!result.delivered) {
+        console.warn(
+          result.preview
+            ? "Workout plan email not delivered because SMTP is not configured."
+            : "Workout plan email was not accepted by the mail transport."
+        );
+      }
+    }).catch((err) => {
+      console.error("Workout plan email failed:", err.message);
     });
     res.status(201).json({ success: true, data: { ...plan.rows[0], session_date: sessionDate, exercise_count: sessions.length } });
   } catch (err) {

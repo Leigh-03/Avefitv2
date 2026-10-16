@@ -3,6 +3,7 @@ const router = express.Router();
 const verifyUser = require("../middleware/userAuthMiddleware");
 const {
   register, login, googleLogin, forgotPassword, resetPassword,
+  requestPasswordChangeCode, changePasswordWithCode,
   verifyEmail, resendVerification, getVerificationStatus,
   getProfile, updateProfile, updatePhoto,
 } = require("../controllers/userController");
@@ -19,6 +20,8 @@ router.post("/login", userLoginLimiter, login);
 router.post("/google-login", userLoginLimiter, googleLogin);
 router.post("/forgot-password", userLoginLimiter, forgotPassword);
 router.post("/reset-password", userLoginLimiter, resetPassword);
+router.post("/password/change-code", verifyUser, verificationResendLimiter, requestPasswordChangeCode);
+router.post("/password/change", verifyUser, verificationAttemptLimiter, changePasswordWithCode);
 
 // Email verification (public: the member has no session until they are verified
 // and approved, so these cannot sit behind verifyUser)

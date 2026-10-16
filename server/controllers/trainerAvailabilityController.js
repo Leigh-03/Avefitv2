@@ -4,6 +4,11 @@ const isValidTime = (value) =>
   typeof value === "string" &&
   /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
 
+const timeToMinutes = (value) => {
+  const [hours, minutes] = value.split(":").map(Number);
+  return hours * 60 + minutes;
+};
+
 const validateAvailability = (availability) => {
   if (!Array.isArray(availability) || availability.length > 70) {
     return "Availability must contain no more than 70 weekly time slots.";
@@ -17,6 +22,9 @@ const validateAvailability = (availability) => {
     }
     if (!isValidTime(slot.start_time) || !isValidTime(slot.end_time)) {
       return "Enter a valid start and end time for every time slot.";
+    }
+    if (timeToMinutes(slot.start_time) < 360 || timeToMinutes(slot.end_time) > 1320) {
+      return "Coach availability must be between 6:00 AM and 10:00 PM.";
     }
     if (slot.start_time >= slot.end_time) {
       return "Each availability slot must end after it starts.";
@@ -146,4 +154,4 @@ const saveForTrainer = async (req, res) => {
   }
 };
 
-module.exports = { getForAdmin, getForTrainer, saveForAdmin, saveForTrainer };
+module.exports = { getForAdmin, getForTrainer, saveForAdmin, saveForTrainer, validateAvailability };
